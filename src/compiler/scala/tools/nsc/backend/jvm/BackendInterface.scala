@@ -440,6 +440,14 @@ abstract class BackendInterface extends BackendInterfaceDefinitions {
     def tpe: Type // todo whats the differentce between tpe and info?
     def thisType: Type
 
+    /** Does this symbol actually correspond to an interface that will be emitted?
+     *  In the backend, this should be preferred over `isInterface` because it
+     *  also returns true for the symbols of the fake companion objects we
+     *  create for Java-defined classes.
+     */
+    final def isEmittedInterface: Boolean = isInterface ||
+      isJavaDefined && isModuleClass && companionClass.isInterface
+
     // tests
     def isClass: Boolean
     def isType: Boolean

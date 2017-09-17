@@ -215,7 +215,8 @@ trait BCodeIdiomatic {
       invokespecial(
         JavaStringBuilderClassName,
         INSTANCE_CONSTRUCTOR_NAME,
-        "()V"
+        "()V",
+        itf = false
       )
     }
 
@@ -398,12 +399,12 @@ trait BCodeIdiomatic {
     final def rem(tk: BType): Unit = { emitPrimitive(JCodeMethodN.remOpcodes, tk) } // can-multi-thread
 
     // can-multi-thread
-    final def invokespecial(owner: String, name: String, desc: String): Unit = {
-      jmethod.visitMethodInsn(Opcodes.INVOKESPECIAL, owner, name, desc, false)
+    final def invokespecial(owner: String, name: String, desc: String, itf: Boolean): Unit = {
+      jmethod.visitMethodInsn(Opcodes.INVOKESPECIAL, owner, name, desc, itf)
     }
     // can-multi-thread
-    final def invokestatic(owner: String, name: String, desc: String): Unit = {
-      jmethod.visitMethodInsn(Opcodes.INVOKESTATIC, owner, name, desc, false)
+    final def invokestatic(owner: String, name: String, desc: String, itf: Boolean): Unit = {
+      jmethod.visitMethodInsn(Opcodes.INVOKESTATIC, owner, name, desc, itf)
     }
     // can-multi-thread
     final def invokeinterface(owner: String, name: String, desc: String): Unit = {
@@ -413,10 +414,6 @@ trait BCodeIdiomatic {
     final def invokevirtual(owner: String, name: String, desc: String): Unit = {
       jmethod.visitMethodInsn(Opcodes.INVOKEVIRTUAL, owner, name, desc, false)
     }
-
-    final def invokedynamic(owner: String, name: String, desc: String): Unit = {
-      jmethod.visitMethodInsn(Opcodes.INVOKEDYNAMIC, owner, name, desc, false)
-     }
 
     // can-multi-thread
     final def goTo(label: asm.Label): Unit = { jmethod.visitJumpInsn(Opcodes.GOTO, label) }
