@@ -410,7 +410,7 @@ trait BCodeIdiomatic {
     }
 
     final def invokedynamic(owner: String, name: String, desc: String): Unit = {
-      jmethod.visitMethodInsn(Opcodes.INVOKEDYNAMIC, owner, name, desc)
+      jmethod.visitMethodInsn(Opcodes.INVOKEDYNAMIC, owner, name, desc, false)
      }
 
     // can-multi-thread
