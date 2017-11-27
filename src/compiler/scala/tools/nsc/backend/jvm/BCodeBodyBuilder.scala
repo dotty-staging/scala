@@ -687,14 +687,14 @@ trait BCodeBodyBuilder extends BCodeSkelBuilder {
               abort(s"Cannot instantiate $tpt of kind: $generatedType")
           }
 
-        case Apply(fun, List(expr)) if isBox(fun.symbol) =>
+        case Apply(fun, List(expr)) if isBox(fun.symbol) && fun.symbol.owner.moduleClass != UnitClass.moduleClass =>
           val nativeKind = tpeTK(expr)
           genLoad(expr, nativeKind)
           val MethodNameAndType(mname, methodType) = asmBoxTo(nativeKind)
           bc.invokestatic(BoxesRunTime.internalName, mname, methodType.descriptor)
           generatedType = boxResultType(fun.symbol) // was toTypeKind(fun.symbol.tpe.resultType)
 
-        case Apply(fun, List(expr)) if isUnbox(fun.symbol) =>
+        case Apply(fun, List(expr)) if isUnbox(fun.symbol) && fun.symbol.owner.moduleClass != UnitClass.moduleClass =>
           genLoad(expr)
           val boxType = unboxResultType(fun.symbol) // was toTypeKind(fun.symbol.owner.linkedClassOfClass.tpe)
           generatedType = boxType
