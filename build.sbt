@@ -105,19 +105,6 @@ lazy val instanceSettings = Seq[Setting[_]](
   crossPaths := false,
   // do not add Scala library jar as a dependency automatically
   autoScalaLibrary := false,
-  // Avoid circular dependencies for scalaInstance (see https://github.com/sbt/sbt/issues/1872)
-  managedScalaInstance := false,
-  scalaInstance := {
-    val s = (scalaInstance in bootstrap).value
-    // sbt claims that s.isManagedVersion is false even though s was resolved by Ivy
-    // We create a managed copy to prevent sbt from putting it on the classpath where we don't want it
-    if(s.isManagedVersion) s else {
-      import sbt.internal.inc.ScalaInstance
-      val s2 = new ScalaInstance(s.version, s.loader, s.loaderLibraryOnly, s.libraryJar, s.compilerJar, s.allJars, Some(s.actualVersion))
-      assert(s2.isManagedVersion)
-      s2
-    }
-  },
   // sbt endeavours to align both scalaOrganization and scalaVersion
   // in the Scala artefacts, for example scala-library and scala-compiler.
   // This doesn't work in the scala/scala build because the version of scala-library and the scalaVersion of
@@ -130,7 +117,8 @@ lazy val instanceSettings = Seq[Setting[_]](
 lazy val commonSettings = instanceSettings ++ clearSourceAndResourceDirectories ++ publishSettings ++ Seq[Setting[_]](
   // we always assume that Java classes are standalone and do not have any dependency
   // on Scala classes
-  compileOrder := CompileOrder.JavaThenScala,
+  // DOTTY: Not true when compiling the dotty-library sources together with the scala-library sources
+  // compileOrder := CompileOrder.JavaThenScala,
   javacOptions in Compile ++= Seq("-g", "-source", "1.8", "-target", "1.8", "-Xlint:unchecked"),
   unmanagedJars in Compile := Seq.empty,  // no JARs in version control!
   sourceDirectory in Compile := baseDirectory.value,
@@ -152,6 +140,10 @@ lazy val commonSettings = instanceSettings ++ clearSourceAndResourceDirectories 
   cleanFiles += (target in Compile in doc).value,
   fork in run := true,
   connectInput in run := true,
+  scalacOptions ++= Seq(
+    "-Ynew-collections",
+    "-language:implicitConversions"
+  ),
   //scalacOptions in Compile += "-deprecation",
   //scalacOptions in Compile += "-Xlint:-nullary-override,-inaccessible,-nonlocal-return,_",
   //scalacOptions ++= Seq("-Xmaxerrs", "5", "-Xmaxwarns", "5"),
@@ -334,6 +326,45 @@ lazy val library = configureAsSubproject(project)
     name := "scala-library",
     description := "Scala Standard Library",
     scalacOptions in Compile ++= Seq[String]("-sourcepath", (scalaSource in Compile).value.toString),
+
+    excludeFilter in unmanagedSources :=
+      HiddenFileFilter ||
+      "AnyVal.scala" ||
+      "language.scala", // Replaced by scalaShadowing/language.scala from dotty-library
+    // Add the sources of dotty-library to the current project to compile the
+    // complete standard library of dotty in one go.
+    sourceGenerators in Compile += Def.task {
+      object DottyLibrarySourcesFilter extends FileFilter {
+        def accept(file: File): Boolean = {
+          val name = file.name
+          val path = file.getCanonicalPath
+          file.isFile &&
+          (path.endsWith(".scala") || path.endsWith(".java")) &&
+           !file.getCanonicalPath.contains("src-non-bootstrapped") &&
+           !path.endsWith("scala/runtime/ModuleSerializationProxy.java") && // This is a copy of the one in scala-library needed until dotty switches to 2.13
+           !path.endsWith("scala/ValueOf.scala") && // This is a copy of the one in scala-library needed until dotty switches to 2.13
+           !path.contains("scalaShadowing") // Corresponding files have been copied in this repo
+        }
+      }
+
+      val s = streams.value
+      val cacheDir = s.cacheDirectory
+      val trgDir = (sourceManaged in Compile).value / "dotty-library-src"
+
+      val dottyLibrarySourcesJar = fetchSourceJarOf("dotty-library", CrossVersion.binary).value
+
+      FileFunction.cached(cacheDir / s"fetchDottyLibrarySource",
+        FilesInfo.lastModified, FilesInfo.exists) { dependencies =>
+        s.log.info(s"Unpacking dotty-library sources to $trgDir...")
+        if (trgDir.exists)
+          IO.delete(trgDir)
+        IO.createDirectory(trgDir)
+        IO.unzip(dottyLibrarySourcesJar, trgDir)
+
+        (trgDir ** DottyLibrarySourcesFilter).get.toSet
+      } (Set(dottyLibrarySourcesJar)).toSeq
+    }.taskValue,
+
     scalacOptions in Compile in doc ++= {
       val libraryAuxDir = (baseDirectory in ThisBuild).value / "src/library-aux"
       Seq(
@@ -1280,4 +1311,46 @@ intellijToSample := {
 def findJar(files: Seq[Attributed[File]], dep: ModuleID): Option[Attributed[File]] = {
   def extract(m: ModuleID) = (m.organization, m.name)
   files.find(_.get(moduleID.key).map(extract _) == Some(extract(dep)))
+}
+
+/** Fetch sources for scalaOrganization.value % moduleName % scalaVersion.value */
+def fetchSourceJarOf(moduleName: String, crossVersion: CrossVersion) = Def.task {
+  val dependencyResolution =
+    librarymanagement.ivy.IvyDependencyResolution(ivyConfiguration.value)
+
+  val log = streams.value.log
+  val scalaInfo = scalaModuleInfo.value
+  val uc0 = Keys.updateConfiguration.value
+  val updateConfiguration = uc0.withArtifactFilter(librarymanagement.ArtifactTypeFilter.allow(Artifact.DefaultSourceTypes))
+  val warningConfiguration = (unresolvedWarningConfiguration in update).value
+
+  val moduleID = (scalaOrganization.value % moduleName % scalaVersion.value).cross(crossVersion)
+
+  val mod = sbt.librarymanagement.GetClassifiersModule(
+    moduleID,
+    scalaInfo,
+    Vector(moduleID),
+    Vector(Configurations.Default) ++ Configurations.default,
+    Vector("sources")
+  )
+
+  dependencyResolution.updateClassifiers(
+    sbt.librarymanagement.GetClassifiersConfiguration(
+      mod,
+      Vector.empty,
+      updateConfiguration,
+      sourceArtifactTypes.value.toVector,
+      Vector.empty
+    ),
+    warningConfiguration,
+    Vector.empty,
+    log
+  ) match {
+    case Right(report) =>
+      val Vector(jar) = report.allFiles
+      jar
+    case _ =>
+      throw new MessageOnlyException(
+        s"Couldn't retrieve `${scalaOrganization.value} %% $moduleName %% ${scalaVersion.value}`.")
+  }
 }

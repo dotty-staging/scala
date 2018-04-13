@@ -34,3 +34,5 @@ addSbtPlugin("pl.project13.scala" % "sbt-jmh" % "0.3.3")
 scalaVersion := "2.12.7"
 
 addSbtPlugin("de.heikoseeberger" % "sbt-header" % "5.0.0")
+
+addSbtPlugin("ch.epfl.lamp" % "sbt-dotty" % "0.3.0")
