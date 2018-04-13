@@ -112,7 +112,7 @@ case class ScalaSig(majorVersion: Int, minorVersion: Int, table: Seq[Int ~ ByteC
 
   def parseEntry(index: Int) = applyRule(ScalaSigParsers.parseEntry(ScalaSigEntryParsers.entry)(index))
 
-  implicit def applyRule[A](parser: ScalaSigParsers.Parser[A]) = ScalaSigParsers.expect(parser)(this)
+  implicit def applyRule[A](parser: ScalaSigParsers.Parser[A]): A = ScalaSigParsers.expect(parser)(this)
 
   override def toString = "ScalaSig version " + majorVersion + "." + minorVersion + {
     for (i <- 0 until table.size) yield i + ":\t" + parseEntry(i) // + "\n\t" + getEntry(i)
@@ -163,7 +163,7 @@ object ScalaSigEntryParsers extends RulesWithState with MemoisableRules {
 
   def parseEntry[A](parser: EntryParser[A])(index: Int) = (toEntry(index) -~ parser)
 
-  implicit def entryType(code: Int) = key filter (_ == code)
+  implicit def entryType(code: Int): EntryParser[Int] = key filter (_ == code)
 
   val index = read(_.index)
   val key = read(_.entryType)
