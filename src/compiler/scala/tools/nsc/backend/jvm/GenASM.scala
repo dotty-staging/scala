@@ -1585,7 +1585,7 @@ abstract class GenASM extends SubComponent with BytecodeWriters { self =>
         if (cst == 0L || cst == 1L) {
           jmethod.visitInsn(Opcodes.LCONST_0 + cst.asInstanceOf[Int])
         } else {
-          jmethod.visitLdcInsn(new java.lang.Long(cst))
+          jmethod.visitLdcInsn(java.lang.Long.valueOf(cst))
         }
       }
 
@@ -2567,7 +2567,7 @@ abstract class GenASM extends SubComponent with BytecodeWriters { self =>
                   emit(Opcodes.ICONST_M1)
                   emit(Opcodes.IXOR)
                 } else if(kind == LONG) {
-                  jmethod.visitLdcInsn(new java.lang.Long(-1))
+                  jmethod.visitLdcInsn(java.lang.Long.valueOf(-1))
                   jmethod.visitInsn(Opcodes.LXOR)
                 } else {
                   abort("Impossible to negate an " + kind)
