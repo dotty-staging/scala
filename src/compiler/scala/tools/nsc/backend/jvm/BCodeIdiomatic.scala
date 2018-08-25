@@ -136,7 +136,7 @@ trait BCodeIdiomatic {
             emit(Opcodes.ICONST_M1)
             emit(Opcodes.IXOR)
           } else if (kind == LONG) {
-            jmethod.visitLdcInsn(new java.lang.Long(-1))
+            jmethod.visitLdcInsn(java.lang.Long.valueOf(-1))
             jmethod.visitInsn(Opcodes.LXOR)
           } else {
             abort(s"Impossible to negate an $kind")
@@ -215,7 +215,8 @@ trait BCodeIdiomatic {
       invokespecial(
         JavaStringBuilderClassName,
         INSTANCE_CONSTRUCTOR_NAME,
-        "()V"
+        "()V",
+        itf = false
       )
     }
 
@@ -325,7 +326,7 @@ trait BCodeIdiomatic {
       } else if (cst >= java.lang.Short.MIN_VALUE && cst <= java.lang.Short.MAX_VALUE) {
         jmethod.visitIntInsn(Opcodes.SIPUSH, cst)
       } else {
-        jmethod.visitLdcInsn(new Integer(cst))
+        jmethod.visitLdcInsn(Integer.valueOf(cst))
       }
     }
 
@@ -334,7 +335,7 @@ trait BCodeIdiomatic {
       if (cst == 0L || cst == 1L) {
         emit(Opcodes.LCONST_0 + cst.asInstanceOf[Int])
       } else {
-        jmethod.visitLdcInsn(new java.lang.Long(cst))
+        jmethod.visitLdcInsn(java.lang.Long.valueOf(cst))
       }
     }
 
@@ -344,7 +345,7 @@ trait BCodeIdiomatic {
       if (bits == 0L || bits == 0x3f800000 || bits == 0x40000000) { // 0..2
         emit(Opcodes.FCONST_0 + cst.asInstanceOf[Int])
       } else {
-        jmethod.visitLdcInsn(new java.lang.Float(cst))
+        jmethod.visitLdcInsn(java.lang.Float.valueOf(cst))
       }
     }
 
@@ -354,7 +355,7 @@ trait BCodeIdiomatic {
       if (bits == 0L || bits == 0x3ff0000000000000L) { // +0.0d and 1.0d
         emit(Opcodes.DCONST_0 + cst.asInstanceOf[Int])
       } else {
-        jmethod.visitLdcInsn(new java.lang.Double(cst))
+        jmethod.visitLdcInsn(java.lang.Double.valueOf(cst))
       }
     }
 
@@ -398,12 +399,12 @@ trait BCodeIdiomatic {
     final def rem(tk: BType): Unit = { emitPrimitive(JCodeMethodN.remOpcodes, tk) } // can-multi-thread
 
     // can-multi-thread
-    final def invokespecial(owner: String, name: String, desc: String): Unit = {
-      jmethod.visitMethodInsn(Opcodes.INVOKESPECIAL, owner, name, desc, false)
+    final def invokespecial(owner: String, name: String, desc: String, itf: Boolean): Unit = {
+      jmethod.visitMethodInsn(Opcodes.INVOKESPECIAL, owner, name, desc, itf)
     }
     // can-multi-thread
-    final def invokestatic(owner: String, name: String, desc: String): Unit = {
-      jmethod.visitMethodInsn(Opcodes.INVOKESTATIC, owner, name, desc, false)
+    final def invokestatic(owner: String, name: String, desc: String, itf: Boolean): Unit = {
+      jmethod.visitMethodInsn(Opcodes.INVOKESTATIC, owner, name, desc, itf)
     }
     // can-multi-thread
     final def invokeinterface(owner: String, name: String, desc: String): Unit = {
@@ -413,10 +414,6 @@ trait BCodeIdiomatic {
     final def invokevirtual(owner: String, name: String, desc: String): Unit = {
       jmethod.visitMethodInsn(Opcodes.INVOKEVIRTUAL, owner, name, desc, false)
     }
-
-    final def invokedynamic(owner: String, name: String, desc: String): Unit = {
-      jmethod.visitMethodInsn(Opcodes.INVOKEDYNAMIC, owner, name, desc, false)
-     }
 
     // can-multi-thread
     final def goTo(label: asm.Label): Unit = { jmethod.visitJumpInsn(Opcodes.GOTO, label) }

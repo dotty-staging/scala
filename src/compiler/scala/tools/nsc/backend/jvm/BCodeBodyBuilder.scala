@@ -691,7 +691,7 @@ trait BCodeBodyBuilder extends BCodeSkelBuilder {
           val nativeKind = tpeTK(expr)
           genLoad(expr, nativeKind)
           val MethodNameAndType(mname, methodType) = asmBoxTo(nativeKind)
-          bc.invokestatic(BoxesRunTime.internalName, mname, methodType.descriptor)
+          bc.invokestatic(BoxesRunTime.internalName, mname, methodType.descriptor, itf = false)
           generatedType = boxResultType(fun.symbol) // was toTypeKind(fun.symbol.tpe.resultType)
 
         case Apply(fun, List(expr)) if isUnbox(fun.symbol) =>
@@ -699,7 +699,7 @@ trait BCodeBodyBuilder extends BCodeSkelBuilder {
           val boxType = unboxResultType(fun.symbol) // was toTypeKind(fun.symbol.owner.linkedClassOfClass.tpe)
           generatedType = boxType
           val MethodNameAndType(mname, methodType) = asmUnboxTo(boxType)
-          bc.invokestatic(BoxesRunTime.internalName, mname, methodType.descriptor)
+          bc.invokestatic(BoxesRunTime.internalName, mname, methodType.descriptor, itf = false)
 
         case app @ Apply(fun, args) =>
           val sym = fun.symbol
@@ -1150,15 +1150,16 @@ trait BCodeBodyBuilder extends BCodeSkelBuilder {
         }
       }
 
-      if (style.isStatic)                 { bc.invokestatic   (jowner, jname, mdescr) }
-      else if (style.isSpecial)           { bc.invokespecial  (jowner, jname, mdescr) }
+      val isInterface = receiver.isEmittedInterface
+      if (style.isStatic)                 { bc.invokestatic   (jowner, jname, mdescr, itf = isInterface) }
+      else if (style.isSpecial)           { bc.invokespecial  (jowner, jname, mdescr, itf = isInterface) }
       else if (style.isVirtual) {
         if (needsInterfaceCall(receiver)) { bc.invokeinterface(jowner, jname, mdescr) }
         else                              { bc.invokevirtual  (jowner, jname, mdescr) }
       }
       else {
         assert(style.isSuper, s"An unknown InvokeStyle: $style")
-        bc.invokespecial(jowner, jname, mdescr)
+        bc.invokespecial(jowner, jname, mdescr, itf = isInterface)
         initModule()
       }
 
@@ -1405,7 +1406,7 @@ trait BCodeBodyBuilder extends BCodeSkelBuilder {
     def genInvokeDynamicLambda(ctor: Symbol, lambdaTarget: Symbol, environmentSize: Int, functionalInterface: Symbol): BType = {
       debuglog(s"Using invokedynamic rather than `new ${ctor.owner}`")
       val generatedType = classBTypeFromSymbol(functionalInterface)
-      val isInterface = lambdaTarget.owner.isInterface
+      val isInterface = lambdaTarget.owner.isEmittedInterface
       val invokeStyle =
         if (lambdaTarget.isStaticMember) asm.Opcodes.H_INVOKESTATIC
         else if (lambdaTarget.isPrivate || lambdaTarget.isClassConstructor) asm.Opcodes.H_INVOKESPECIAL
@@ -1417,7 +1418,7 @@ trait BCodeBodyBuilder extends BCodeSkelBuilder {
           classBTypeFromSymbol(lambdaTarget.owner).internalName,
           lambdaTarget.name.mangledString,
           asmMethodType(lambdaTarget).descriptor,
-          isInterface)
+          /* itf = */ isInterface)
 
       val (a,b) = lambdaTarget.info.paramTypes.splitAt(environmentSize)
       var (capturedParamsTypes, lambdaParamTypes) = if(int.doLabmdasFollowJVMMetafactoryOrder) (a,b) else (b,a)
@@ -1448,6 +1449,6 @@ trait BCodeBodyBuilder extends BCodeSkelBuilder {
     new asm.Handle(asm.Opcodes.H_INVOKESTATIC,
       int.LambdaMetaFactory.javaBinaryName, int.MetafactoryName,
       "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;",
-      int.LambdaMetaFactory.isInterface)
+      /* itf = */  int.LambdaMetaFactory.isEmittedInterface)
 
 }
