@@ -202,7 +202,10 @@ trait BCodeBodyBuilder extends BCodeSkelBuilder {
       val success = new asm.Label
       val failure = new asm.Label
 
-      val hasElse = !elsep.isEmpty
+      val hasElse = !elsep.isEmpty && (elsep match {
+        case Literal(value) if value.tag == UnitTag => false
+	case _ => true
+      })
       val postIf  = if (hasElse) new asm.Label else failure
 
       genCond(condp, success, failure, targetIfNoJump = success)
