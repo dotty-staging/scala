@@ -33,6 +33,7 @@ abstract class BackendInterface extends BackendInterfaceDefinitions {
   type Throw      >: Null <: Tree
   type Labeled    >: Null <: Tree
   type Return     >: Null <: Tree
+  type WhileDo    >: Null <: Tree
   type Literal    >: Null <: Tree
   type Block      >: Null <: Tree
   type Typed      >: Null <: Tree
@@ -69,6 +70,7 @@ abstract class BackendInterface extends BackendInterfaceDefinitions {
   implicit val ThrowTag: ClassTag[Throw]
   implicit val LabeledTag: ClassTag[Labeled]
   implicit val ReturnTag: ClassTag[Return]
+  implicit val WhileDoTag: ClassTag[WhileDo]
   implicit val LiteralTag: ClassTag[Literal]
   implicit val BlockTag: ClassTag[Block]
   implicit val TypedTag: ClassTag[Typed]
@@ -205,6 +207,7 @@ abstract class BackendInterface extends BackendInterfaceDefinitions {
   val Try: TryDeconstructor
   val Labeled: LabeledDeconstructor
   val Return: ReturnDeconstructor
+  val WhileDo: WhileDoDeconstructor
   val LabelDef: LabelDeconstructor
   val Literal: LiteralDeconstructor
   val Typed: TypedDeconstrutor
@@ -300,6 +303,11 @@ abstract class BackendInterface extends BackendInterfaceDefinitions {
   abstract class ReturnDeconstructor extends DeconstructorCommon[Return]{
     def _1: Tree // expr
     def _2: Symbol // target label, NoSymbol if return to method
+  }
+
+  abstract class WhileDoDeconstructor extends DeconstructorCommon[WhileDo]{
+    def _1: Tree // cond
+    def _2: Tree // body
   }
 
   abstract class ThrownException {

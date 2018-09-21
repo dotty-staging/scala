@@ -204,7 +204,7 @@ trait BCodeBodyBuilder extends BCodeSkelBuilder {
 
       val hasElse = !elsep.isEmpty && (elsep match {
         case Literal(value) if value.tag == UnitTag => false
-	case _ => true
+        case _ => true
       })
       val postIf  = if (hasElse) new asm.Label else failure
 
@@ -307,6 +307,9 @@ trait BCodeBodyBuilder extends BCodeSkelBuilder {
         case r @ Return(_) =>
           genReturn(r)
           generatedType = expectedType
+
+        case t @ WhileDo(_, _) =>
+          generatedType = genWhileDo(t)
 
         case t @ Try(_, _, _) =>
           generatedType = genLoadTry(t)
@@ -598,6 +601,45 @@ trait BCodeBodyBuilder extends BCodeSkelBuilder {
         bc goTo programPoint(fromSym)
       }
     } // end of genReturn()
+
+    def genWhileDo(tree: WhileDo): BType = tree match{
+      case WhileDo(cond, body) =>
+
+      val isInfinite = cond match {
+        case Literal(value) if value.tag == BooleanTag => value.booleanValue
+        case _ => false
+      }
+
+      val loop = new asm.Label
+      markProgramPoint(loop)
+
+      if (isInfinite) {
+        genLoad(body, UNIT)
+        bc goTo loop
+      } else {
+        val hasBody = cond match {
+          case Literal(value) if value.tag == UnitTag => false
+          case _ => true
+        }
+
+        if (hasBody) {
+          val success = new asm.Label
+          val failure = new asm.Label
+          genCond(cond, success, failure, targetIfNoJump = success)
+          markProgramPoint(success)
+          genLoad(body, UNIT)
+          bc goTo loop
+          markProgramPoint(failure)
+        } else {
+          // this is the shape of do..while loops, so do something smart about them
+          val failure = new asm.Label
+          genCond(cond, loop, failure, targetIfNoJump = failure)
+          markProgramPoint(failure)
+        }
+      }
+
+      UNIT
+    }
 
     def genTypeApply(t: TypeApply): BType = t match {
       case TypeApply(fun@Select(obj, _), targs) =>
