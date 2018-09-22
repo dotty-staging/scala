@@ -356,7 +356,7 @@ class ScalacBackendInterface[G <: Global](val global: G) extends BackendInterfac
 
   def getClassIfDefined(fullname: String): Symbol = rootMirror.getClassIfDefined(fullname)
 
-  def shouldEmitJumpAfterLabels: Boolean = false
+  def hasLabelDefs: Boolean = true
 
   def shouldEmitAnnotation(annot: Annotation): Boolean = {
     annot.symbol.initialize.isJavaDefined &&

@@ -163,7 +163,7 @@ abstract class BackendInterface extends BackendInterfaceDefinitions {
   def sourceFileFor(cu: CompilationUnit): String
   def setMainClass(name: String): Unit
   def informProgress(msg: String): Unit
-  def shouldEmitJumpAfterLabels: Boolean // see comment on dotty.tools.backend.jvm.LabelDefs
+  def hasLabelDefs: Boolean // whether this compiler uses LabelDefs (i.e., scalac)
 
   /* backend actually uses free names to generate stuff. This should NOT mangled */
   def newTermName(prefix: String): Name

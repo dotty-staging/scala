@@ -533,17 +533,16 @@ trait BCodeBodyBuilder extends BCodeSkelBuilder {
       }
     }
 
-    private def genLabelDef(lblDf: LabelDef, expectedType: BType, jumpTo: asm.Label = null): Unit = lblDf match {
+    private def genLabelDef(lblDf: LabelDef, expectedType: BType): Unit = lblDf match {
       case LabelDef(_, _, rhs) =>
+
+      assert(int.hasLabelDefs) // scalac
+
       // duplication of LabelDefs contained in `finally`-clauses is handled when emitting RETURN. No bookkeeping for that required here.
       // no need to call index() over lblDf.params, on first access that magic happens (moreover, no LocalVariableTable entries needed for them).
       markProgramPoint(programPoint(lblDf.symbol))
       lineNumber(lblDf)
       genLoad(rhs, expectedType)
-      if(jumpTo ne null) { // dotty
-        bc goTo jumpTo
-      }
-      else assert(!int.shouldEmitJumpAfterLabels) // scalac
     }
 
     private def genLabeled(tree: Labeled): BType = tree match {
@@ -776,6 +775,7 @@ trait BCodeBodyBuilder extends BCodeSkelBuilder {
           val sym = fun.symbol
 
           if (sym.isLabel) {  // jump to a label
+            assert(int.hasLabelDefs)
             genLoadLabelArguments(args, labelDef(sym), app.pos)
             bc goTo programPoint(sym)
           } else if (isPrimitive(fun)) { // primitive method call
@@ -924,44 +924,18 @@ trait BCodeBodyBuilder extends BCodeSkelBuilder {
     def genBlock(tree: Block, expectedType: BType) = tree match {
       case Block(stats, expr) =>
 
-
-      def genNormalBlock =  {
-        val savedScope = varsInScope
-        varsInScope = Nil
-        stats foreach genStat
-        genLoad(expr, expectedType)
-        val end = currProgramPoint()
-        if (emitVars) {
-          // add entries to LocalVariableTable JVM attribute
-          for ((sym, start) <- varsInScope.reverse) {
-            emitLocalVarScope(sym, start, end)
-          }
+      val savedScope = varsInScope
+      varsInScope = Nil
+      stats foreach genStat
+      genLoad(expr, expectedType)
+      val end = currProgramPoint()
+      if (emitVars) {
+        // add entries to LocalVariableTable JVM attribute
+        for ((sym, start) <- varsInScope.reverse) {
+          emitLocalVarScope(sym, start, end)
         }
-        varsInScope = savedScope
       }
-
-      if(!int.shouldEmitJumpAfterLabels) genNormalBlock
-      else {
-        val (prefixLabels: List[LabelDef] @unchecked, stats1) = stats.span {
-          case t@LabelDef(_, _, _) => true
-          case _ => false
-        }
-        assert(stats1.isEmpty || prefixLabels.isEmpty)
-        if (!prefixLabels.isEmpty) {
-          val startLocation = new asm.Label
-          val breakLocation = new asm.Label
-          bc goTo startLocation
-          prefixLabels.foreach{ lblDf => labelDef.+=(lblDf.symbol -> lblDf)}
-          prefixLabels.foreach{ lblDf => genLabelDef(lblDf, tpeTK(lblDf), breakLocation)}
-          markProgramPoint(startLocation)
-          val generated = tpeTK(expr)
-          genLoad(expr, generated)
-          markProgramPoint(breakLocation)
-          if (generated != expectedType)
-            adapt(generated, expectedType)
-        }
-        else genNormalBlock
-      }
+      varsInScope = savedScope
     }
 
     def adapt(from: BType, to: BType): Unit = {

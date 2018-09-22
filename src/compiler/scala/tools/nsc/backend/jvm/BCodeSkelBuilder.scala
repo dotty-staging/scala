@@ -281,7 +281,7 @@ trait BCodeSkelBuilder extends BCodeHelpers {
      *  A related map is `labelDef`: it has the same keys as `jumpDest` but its values are LabelDef nodes not asm.Labels.
      *
      */
-    var jumpDest: immutable.Map[ /* LabelDef */ Symbol, asm.Label ] = null
+    var jumpDest: immutable.Map[ /* Labeled or LabelDef */ Symbol, asm.Label ] = null
     def programPoint(labelSym: Symbol): asm.Label = {
       assert(labelSym.isLabel, s"trying to map a non-label symbol to an asm.Label, at: ${labelSym.pos}")
       jumpDest.getOrElse(labelSym, {
