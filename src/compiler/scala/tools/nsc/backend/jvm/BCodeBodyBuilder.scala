@@ -605,10 +605,7 @@ trait BCodeBodyBuilder extends BCodeSkelBuilder {
     def genWhileDo(tree: WhileDo): BType = tree match{
       case WhileDo(cond, body) =>
 
-      val isInfinite = cond match {
-        case Literal(value) if value.tag == BooleanTag => value.booleanValue
-        case _ => false
-      }
+      val isInfinite = cond == EmptyTree
 
       val loop = new asm.Label
       markProgramPoint(loop)
@@ -616,6 +613,7 @@ trait BCodeBodyBuilder extends BCodeSkelBuilder {
       if (isInfinite) {
         genLoad(body, UNIT)
         bc goTo loop
+        RT_NOTHING
       } else {
         val hasBody = cond match {
           case Literal(value) if value.tag == UnitTag => false
@@ -636,9 +634,9 @@ trait BCodeBodyBuilder extends BCodeSkelBuilder {
           genCond(cond, loop, failure, targetIfNoJump = failure)
           markProgramPoint(failure)
         }
-      }
 
-      UNIT
+        UNIT
+      }
     }
 
     def genTypeApply(t: TypeApply): BType = t match {
