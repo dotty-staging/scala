@@ -254,8 +254,6 @@ trait BCodeBodyBuilder extends BCodeSkelBuilder {
 
         BOOL
       }
-      else if (code == SYNCHRONIZED)
-        genSynchronized(tree, expectedType)
       else if (isCoercion(code)) {
         genLoad(receiver)
         lineNumber(tree)
@@ -714,8 +712,9 @@ trait BCodeBodyBuilder extends BCodeSkelBuilder {
           generatedType = toTypeKind(c.typeValue)
           mkArrayConstructorCall(generatedType.asArrayBType, app, dims)
         case Apply(t :TypeApply, _) =>
-
-          generatedType = genTypeApply(t)
+          generatedType =
+            if (t.symbol ne Object_synchronized) genTypeApply(t)
+            else genSynchronized(app, expectedType)
 
         // 'super' call: Note: since constructors are supposed to
         // return an instance of what they construct, we have to take

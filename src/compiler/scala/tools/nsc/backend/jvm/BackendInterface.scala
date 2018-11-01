@@ -697,6 +697,7 @@ abstract class BackendInterfaceDefinitions { self: BackendInterface =>
   val ObjectClass: Symbol
   val Object_isInstanceOf: Symbol
   val Object_asInstanceOf: Symbol
+  val Object_synchronized: Symbol
   val Object_equals: Symbol
   val ArrayClass: Symbol
 
