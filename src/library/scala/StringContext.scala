@@ -61,7 +61,7 @@ case class StringContext(parts: String*) {
 
   @deprecated("use same-named method on StringContext companion object", "2.13.0")
   def checkLengths(args: scala.collection.Seq[Any]): Unit =
-    StringContext.checkLengths(args, parts)
+    StringContext.checkLengths(args, parts.toSeq)
 
   /** The simple string interpolator.
    *
@@ -91,7 +91,7 @@ case class StringContext(parts: String*) {
    *  @note   The Scala compiler may replace a call to this method with an equivalent, but more efficient,
    *          use of a StringBuilder.
    */
-  def s(args: Any*): String = standardInterpolator(processEscapes, args, parts)
+  def s(args: Any*): String = standardInterpolator(processEscapes, args, parts.toSeq)
 
   /** The raw string interpolator.
    *
@@ -115,7 +115,7 @@ case class StringContext(parts: String*) {
    *  @note   The Scala compiler may replace a call to this method with an equivalent, but more efficient,
    *          use of a StringBuilder.
    */
-  def raw(args: Any*): String = standardInterpolator(identity, args, parts)
+  def raw(args: Any*): String = standardInterpolator(identity, args, parts.toSeq)
 
   /** The formatted string interpolator.
    *
