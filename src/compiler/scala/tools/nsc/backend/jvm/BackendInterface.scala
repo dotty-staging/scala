@@ -511,6 +511,7 @@ abstract class BackendInterface extends BackendInterfaceDefinitions {
     def isJavaEntryPoint: Boolean
     def isJavaDefaultMethod: Boolean
     def isClassConstructor: Boolean
+    def isSerializable: Boolean
 
     /**
      * True for module classes of modules that are top-level or owned only by objects. Module classes
@@ -585,6 +586,11 @@ abstract class BackendInterface extends BackendInterfaceDefinitions {
 
 
     def samMethod(): Symbol
+
+    /** Is this the symbol of one of the `scala.Function*` class ?
+     *  Note that this will return false for subclasses of these classes.
+     */
+    def isFunctionClass: Boolean
   }
 
   abstract class TypeHelper {
@@ -723,7 +729,6 @@ abstract class BackendInterfaceDefinitions { self: BackendInterface =>
 
   val ScalaATTRName: String = "Scala"
   val ScalaSignatureATTRName: String = "ScalaSig"
-  val MetafactoryName: String = "metafactory"
 
   def doLabmdasFollowJVMMetafactoryOrder: Boolean = true
 
@@ -745,6 +750,8 @@ abstract class BackendInterfaceDefinitions { self: BackendInterface =>
   val JavaSerializableClass: Symbol = requiredClass[java.io.Serializable]
   val SerializableClass: Symbol = requiredClass[scala.Serializable]
   val ClassCastExceptionClass: Symbol = requiredClass[java.lang.ClassCastException]
+  val IllegalArgExceptionClass: Symbol = requiredClass[java.lang.IllegalArgumentException]
+  val SerializedLambdaClass: Symbol = requiredClass[java.lang.invoke.SerializedLambda]
 
   val ClassfileAnnotationClass: Symbol = requiredClass[scala.annotation.ClassfileAnnotation]
   val BoxedNumberClass: Symbol = requiredClass[java.lang.Number]

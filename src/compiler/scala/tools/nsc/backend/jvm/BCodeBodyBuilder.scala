@@ -12,7 +12,7 @@ package jvm
 import scala.annotation.switch
 
 import scala.tools.asm
-import scala.tools.asm.Label
+import scala.tools.asm.{Handle, Label, Opcodes}
 import scala.tools.nsc.backend.jvm.BCodeHelpers.InvokeStyle
 
 /*
@@ -27,6 +27,7 @@ trait BCodeBodyBuilder extends BCodeSkelBuilder {
   import int._
   import bTypes._
   import coreBTypes._
+  import BCodeBodyBuilder._
 
   /*
    * Functionality to build the body of ASM MethodNode, except for `synchronized` and `try` expressions.
@@ -1448,8 +1449,13 @@ trait BCodeBodyBuilder extends BCodeSkelBuilder {
     def genLoadTry(tree: Try): BType
 
     def genInvokeDynamicLambda(ctor: Symbol, lambdaTarget: Symbol, environmentSize: Int, functionalInterface: Symbol): BType = {
+      import java.lang.invoke.LambdaMetafactory.FLAG_SERIALIZABLE
+
       debuglog(s"Using invokedynamic rather than `new ${ctor.owner}`")
       val generatedType = classBTypeFromSymbol(functionalInterface)
+      // Lambdas should be serializable if they implement a SAM that extends Serializable or if they
+      // implement a scala.Function* class.
+      val isSerializable = functionalInterface.isSerializable || functionalInterface.isFunctionClass
       val isInterface = lambdaTarget.owner.isEmittedInterface
       val invokeStyle =
         if (lambdaTarget.isStaticMember) asm.Opcodes.H_INVOKESTATIC
@@ -1481,18 +1487,45 @@ trait BCodeBodyBuilder extends BCodeSkelBuilder {
         val mt = asmMethodType(abstractMethod)
         mt.toASMType
       }
-      bc.jmethod.visitInvokeDynamicInsn(methodName, desc, lambdaMetaFactoryBootstrapHandle,
-        // boostrap args
-        applyN, targetHandle, constrainedType
-      )
+      val bsmArgs0 = Seq(applyN, targetHandle, constrainedType)
+      val bsmArgs =
+        if (isSerializable)
+          bsmArgs0 :+ Int.box(FLAG_SERIALIZABLE)
+        else
+          bsmArgs0
+
+      val metafactory =
+        if (isSerializable)
+          lambdaMetaFactoryAltMetafactoryHandle // altMetafactory needed to be able to pass the SERIALIZABLE flag
+        else
+          lambdaMetaFactoryMetafactoryHandle
+
+      bc.jmethod.visitInvokeDynamicInsn(methodName, desc, metafactory, bsmArgs: _*)
 
       generatedType
     }
   }
-  val lambdaMetaFactoryBootstrapHandle =
-    new asm.Handle(asm.Opcodes.H_INVOKESTATIC,
-      int.LambdaMetaFactory.javaBinaryName, int.MetafactoryName,
-      "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;",
-      /* itf = */  int.LambdaMetaFactory.isEmittedInterface)
+}
 
+object BCodeBodyBuilder {
+  val lambdaMetaFactoryMetafactoryHandle = new Handle(
+    Opcodes.H_INVOKESTATIC,
+    "java/lang/invoke/LambdaMetafactory",
+    "metafactory",
+    "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;",
+    /* itf = */ false)
+
+  val lambdaMetaFactoryAltMetafactoryHandle = new Handle(
+    Opcodes.H_INVOKESTATIC,
+    "java/lang/invoke/LambdaMetafactory",
+    "altMetafactory",
+    "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;[Ljava/lang/Object;)Ljava/lang/invoke/CallSite;",
+    /* itf = */ false)
+
+  val lambdaDeserializeBootstrapHandle = new Handle(
+    Opcodes.H_INVOKESTATIC,
+    "scala/runtime/LambdaDeserialize",
+    "bootstrap",
+    "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;[Ljava/lang/invoke/MethodHandle;)Ljava/lang/invoke/CallSite;",
+    /* itf = */ false)
 }
