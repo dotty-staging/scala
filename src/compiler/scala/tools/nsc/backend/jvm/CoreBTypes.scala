@@ -119,6 +119,8 @@ class CoreBTypes[BTFS <: BTypesFromSymbols[_ <: BackendInterface]](val bTypes: B
   lazy val jioSerializableReference    : ClassBType = classBTypeFromSymbol(JavaSerializableClass)     // java/io/Serializable
   lazy val scalaSerializableReference  : ClassBType = classBTypeFromSymbol(SerializableClass)         // scala/Serializable
   lazy val classCastExceptionReference : ClassBType = classBTypeFromSymbol(ClassCastExceptionClass)   // java/lang/ClassCastException
+  lazy val jlIllegalArgExceptionRef: ClassBType = classBTypeFromSymbol(IllegalArgExceptionClass)
+  lazy val jliSerializedLambdaRef: ClassBType = classBTypeFromSymbol(SerializedLambdaClass)
 
   lazy val srBooleanRef : ClassBType = classBTypeFromSymbol(requiredClass[scala.runtime.BooleanRef])
   lazy val srByteRef    : ClassBType = classBTypeFromSymbol(requiredClass[scala.runtime.ByteRef])
@@ -249,6 +251,8 @@ final class CoreBTypesProxy[BTFS <: BTypesFromSymbols[_ <: BackendInterface]](va
   def jioSerializableReference    : ClassBType = _coreBTypes.jioSerializableReference
   def scalaSerializableReference  : ClassBType = _coreBTypes.scalaSerializableReference
   def classCastExceptionReference : ClassBType = _coreBTypes.classCastExceptionReference
+  def jlIllegalArgExceptionRef    : ClassBType = _coreBTypes.jlIllegalArgExceptionRef
+  def jliSerializedLambdaRef      : ClassBType = _coreBTypes.jliSerializedLambdaRef
 
   def srBooleanRef : ClassBType = _coreBTypes.srBooleanRef
   def srByteRef    : ClassBType = _coreBTypes.srByteRef
