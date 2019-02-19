@@ -1,9 +1,6 @@
-val dottyVersion = dottyLatestNightlyBuild.get
-
 lazy val scalap = project
   .in(file("src/scalap"))
   .settings(
-    scalaVersion := dottyVersion,
     scalacOptions := List("-language:Scala2"),
 
     sourceDirectory in Compile := baseDirectory.value,
