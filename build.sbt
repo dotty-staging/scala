@@ -1,9 +1,6 @@
-val dottyVersion = dottyLatestNightlyBuild.get
-
 lazy val library = project
   .in(file("src/library"))
   .settings(
-    scalaVersion := dottyVersion,
     scalacOptions ++= Seq(
       "-feature",
       "-deprecation",
