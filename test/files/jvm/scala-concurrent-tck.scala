@@ -877,7 +877,7 @@ class CustomExecutionContext extends TestBase {
     val _count = new java.util.concurrent.atomic.AtomicInteger(0)
     def count = _count.get
 
-    def delegate = ExecutionContext.global
+    def `delegate` = ExecutionContext.global
 
     override def execute(runnable: Runnable) = {
       _count.incrementAndGet()
@@ -891,12 +891,12 @@ class CustomExecutionContext extends TestBase {
           }
         }
       }
-      delegate.execute(wrapper)
+      `delegate`.execute(wrapper)
     }
 
     override def reportFailure(t: Throwable): Unit = {
       System.err.println("Failure: " + t.getClass.getSimpleName + ": " + t.getMessage)
-      delegate.reportFailure(t)
+      `delegate`.reportFailure(t)
     }
   }
 
@@ -1014,10 +1014,10 @@ class ExecutionContextPrepare extends TestBase {
   }
 
   class PreparingExecutionContext extends ExecutionContext {
-    def delegate = ExecutionContext.global
+    def `delegate` = ExecutionContext.global
 
     override def execute(runnable: Runnable): Unit =
-      delegate.execute(runnable)
+      `delegate`.execute(runnable)
 
     override def prepare(): ExecutionContext = {
       // save object stored in ThreadLocal storage
@@ -1032,13 +1032,13 @@ class ExecutionContextPrepare extends TestBase {
               runnable.run()
             }
           }
-          delegate.execute(wrapper)
+          `delegate`.execute(wrapper)
         }
       }
     }
 
     override def reportFailure(t: Throwable): Unit =
-      delegate.reportFailure(t)
+      `delegate`.reportFailure(t)
   }
 
   implicit val ec = new PreparingExecutionContext

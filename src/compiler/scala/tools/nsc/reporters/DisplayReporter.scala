@@ -130,7 +130,7 @@ class DefaultReporter(settings: Settings, writer: PrintWriter, echo: PrintWriter
   with LimitFilter {
   // required constructor for -Xreporter
   def this(settings: Settings) = this(settings, new PrintWriter(Console.err, true), new PrintWriter(Console.out, true))
-  private def displayReporter = delegate.asInstanceOf[DisplayReporter]
+  private def displayReporter = `delegate`.asInstanceOf[DisplayReporter]
   def shortname_=(flag: Boolean): Unit = displayReporter.shortname = flag
   def shortname: Boolean = displayReporter.shortname
   def maxerrs = settings.maxerrs.value
@@ -165,9 +165,9 @@ trait Filtering { _: InternalReporter =>
  *  Concrete subclasses should implement just the abstract `filter` method.
  */
 trait FilteringReporter extends ForwardingReporter with Filtering {
-  override def echo(pos: Position, msg: String)    = if (filter(pos, msg, INFO)) delegate.echo(pos, msg)
-  override def warning(pos: Position, msg: String) = if (filter(pos, msg, WARNING)) delegate.warning(pos, msg)
-  override def error(pos: Position, msg: String)   = if (filter(pos, msg, ERROR)) delegate.error(pos, msg)
+  override def echo(pos: Position, msg: String)    = if (filter(pos, msg, INFO)) `delegate`.echo(pos, msg)
+  override def warning(pos: Position, msg: String) = if (filter(pos, msg, WARNING)) `delegate`.warning(pos, msg)
+  override def error(pos: Position, msg: String)   = if (filter(pos, msg, ERROR)) `delegate`.error(pos, msg)
 }
 
 /** A `Reporter` that counts messages that are passed by the filter. */

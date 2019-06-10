@@ -364,13 +364,13 @@ sealed trait ProfileReporter {
 
 object ConsoleProfileReporter extends ProfileReporter {
   private val outWriter = new PrintWriter(Console.out)
-  private val delegate = new StreamProfileReporter(new PrintWriter(Console.out))
-  override def reportBackground(profiler: RealProfiler, threadRange: ProfileRange): Unit = delegate.reportBackground(profiler, threadRange)
-  override def reportForeground(profiler: RealProfiler, threadRange: ProfileRange): Unit = delegate.reportForeground(profiler, threadRange)
+  private val `delegate` = new StreamProfileReporter(new PrintWriter(Console.out))
+  override def reportBackground(profiler: RealProfiler, threadRange: ProfileRange): Unit = `delegate`.reportBackground(profiler, threadRange)
+  override def reportForeground(profiler: RealProfiler, threadRange: ProfileRange): Unit = `delegate`.reportForeground(profiler, threadRange)
   override def close(profiler: RealProfiler): Unit = outWriter.flush()
 
-  override def header(profiler: RealProfiler): Unit = delegate.header(profiler)
-  override def reportGc(data: GcEventData): Unit = delegate.reportGc(data)
+  override def header(profiler: RealProfiler): Unit = `delegate`.header(profiler)
+  override def reportGc(data: GcEventData): Unit = `delegate`.reportGc(data)
 }
 
 object NoOpProfileReporter extends ProfileReporter {

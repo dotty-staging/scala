@@ -174,8 +174,8 @@ final class FileZipArchive(file: JFile, release: Option[String]) extends ZipArch
     override def input: InputStream = {
       val zipFile  = openZipFile()
       val entry    = zipFile.getEntry(name) // with `-release`, returns the correct version under META-INF/versions
-      val delegate = zipFile.getInputStream(entry)
-      new FilterInputStream(delegate) {
+      val `delegate` = zipFile.getInputStream(entry)
+      new FilterInputStream(`delegate`) {
         override def close(): Unit = { zipFile.close() }
       }
     }

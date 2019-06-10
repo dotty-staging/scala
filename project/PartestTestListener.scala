@@ -13,7 +13,7 @@ import sbt.internal.util.EscHelpers.removeEscapeSequences
 //
 // Let's roll our own to try to enable the Jenkins JUnit test reports.
 class PartestTestListener(target: File) extends TestsListener {
-  val delegate = new JUnitXmlTestsListener(target.getAbsolutePath)
+  val `delegate` = new JUnitXmlTestsListener(target.getAbsolutePath)
   import java.util.EnumSet
 
   import sbt.testing.{Status => TStatus}
@@ -54,10 +54,10 @@ class PartestTestListener(target: File) extends TestsListener {
       val skipCount = statii.count(skipStatus.contains)
       val testCount = statii.size
       val totalDurationMs = events.iterator.map(_.duration()).sum
-      val xml = <testsuite hostname={delegate.hostname} name={group}
+      val xml = <testsuite hostname={`delegate`.hostname} name={group}
                            tests={"" + testCount} errors={"" + errorCount} failures={"" + failCount}
                            skipped={"" + skipCount} time={(1.0 * totalDurationMs / 1000).toString}>
-        {delegate.properties}{for (e <- events) yield {
+        {`delegate`.properties}{for (e <- events) yield {
           val trace: String = if (e.throwable.isDefined) {
             val stringWriter = new StringWriter()
             val writer = new PrintWriter(stringWriter)

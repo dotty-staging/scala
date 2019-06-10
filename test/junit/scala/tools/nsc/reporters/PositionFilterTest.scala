@@ -21,7 +21,7 @@ class PositionFilterTest {
   def createFilter: PositionFiltering = new InternalReporter with PositionFiltering with CountingReporter {
     def noWarnings = false
     def suppressed(pos: Position, msg: String, severity: Severity): Unit = ()
-    val delegate = store
+    val `delegate` = store
   }
 
   @Test

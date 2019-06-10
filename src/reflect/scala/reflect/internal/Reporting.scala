@@ -134,14 +134,14 @@ abstract class Reporter {
 trait ForwardingReporter extends Reporter {
 
   /* Receiver of all forwarded calls. */
-  protected val delegate: Reporter
+  protected val `delegate`: Reporter
 
   /* Convenience method to forward a given message to the delegate reporter. */
   protected def forward(pos: Position, msg: String, severity: Severity): Unit =
     severity match {
-      case ERROR   => delegate.error(pos, msg)
-      case WARNING => delegate.warning(pos, msg)
-      case INFO    => delegate.echo(pos, msg)
+      case ERROR   => `delegate`.error(pos, msg)
+      case WARNING => `delegate`.warning(pos, msg)
+      case INFO    => `delegate`.echo(pos, msg)
       case _       => throw new IllegalArgumentException(s"Unknown severity: $severity")
     }
 
@@ -149,11 +149,11 @@ trait ForwardingReporter extends Reporter {
   protected def info0(pos: Position, msg: String, severity: Severity, force: Boolean): Unit =
     throw new UnsupportedOperationException(s"$msg ($pos)")
 
-  override def echo(pos: Position, msg: String)    = delegate.echo(pos, msg)
-  override def warning(pos: Position, msg: String) = delegate.warning(pos, msg)
-  override def error(pos: Position, msg: String)   = delegate.error(pos, msg)
+  override def echo(pos: Position, msg: String)    = `delegate`.echo(pos, msg)
+  override def warning(pos: Position, msg: String) = `delegate`.warning(pos, msg)
+  override def error(pos: Position, msg: String)   = `delegate`.error(pos, msg)
 
-  override def reset()      = { super.reset() ; delegate.reset() }
-  override def flush()      = { super.flush() ; delegate.flush() }
-  override def finish()     = { super.finish() ; delegate.finish() }
+  override def reset()      = { super.reset() ; `delegate`.reset() }
+  override def flush()      = { super.flush() ; `delegate`.flush() }
+  override def finish()     = { super.finish() ; `delegate`.finish() }
 }

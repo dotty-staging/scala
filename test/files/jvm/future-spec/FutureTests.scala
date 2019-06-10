@@ -851,7 +851,7 @@ class FutureTests extends MinimalScalaTest {
 
     "should delegate equivalently to unit.flatMap on failure" in {
       val t = new Exception("test")
-      val df = Future.delegate(throw t)
+      val df = Future.`delegate`(throw t)
       val fm = Future.unit.flatMap(_ => throw t)
 
       Await.ready(df, defaultTimeout)
@@ -861,7 +861,7 @@ class FutureTests extends MinimalScalaTest {
 
     "should delegate equivalently to unit.flatMap on success" in {
       val f = Future.successful("test")
-      val df = Future.delegate(f)
+      val df = Future.`delegate`(f)
       val fm = Future.unit.flatMap(_ => f)
 
       Await.ready(df, defaultTimeout)

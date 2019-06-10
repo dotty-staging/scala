@@ -248,8 +248,8 @@ class JavapClass(
       ) invoke (null, reporter, new PrintWriter(System.err, true))).asInstanceOf[JavaFileManager] orFailed null
 
     // manages named arrays of bytes, which might have failed to load
-    class JavapFileManager(val managed: Seq[Input])(delegate: JavaFileManager = defaultFileManager)
-      extends ForwardingJavaFileManager[JavaFileManager](delegate) {
+    class JavapFileManager(val managed: Seq[Input])(`delegate`: JavaFileManager = defaultFileManager)
+      extends ForwardingJavaFileManager[JavaFileManager](`delegate`) {
       import JavaFileManager.Location
       import JavaFileObject.Kind
       import Kind._

@@ -1034,14 +1034,14 @@ object ILoop {
 
   def testConfig(settings: Settings) =
     new ShellConfig {
-      private val delegate = ShellConfig(settings)
+      private val `delegate` = ShellConfig(settings)
 
-      val filesToPaste: List[String] = delegate.filesToPaste
-      val filesToLoad: List[String] = delegate.filesToLoad
-      val batchText: String = delegate.batchText
-      val batchMode: Boolean = delegate.batchMode
-      val doCompletion: Boolean = delegate.doCompletion
-      val haveInteractiveConsole: Boolean = delegate.haveInteractiveConsole
+      val filesToPaste: List[String] = `delegate`.filesToPaste
+      val filesToLoad: List[String] = `delegate`.filesToLoad
+      val batchText: String = `delegate`.batchText
+      val batchMode: Boolean = `delegate`.batchMode
+      val doCompletion: Boolean = `delegate`.doCompletion
+      val haveInteractiveConsole: Boolean = `delegate`.haveInteractiveConsole
 
       // No truncated output, because the result changes on Windows because of line endings
       override val maxPrintString = {
