@@ -239,15 +239,16 @@ sealed abstract class List[+A]
       var rest = this
       var h: ::[B] = null
       // Special case for first element
-      do {
+      while ({
         val x: Any = pf.applyOrElse(rest.head, List.partialNotApplied)
         if (x.asInstanceOf[AnyRef] ne List.partialNotApplied) h = new ::(x.asInstanceOf[B], Nil)
         rest = rest.tail
         if (rest eq Nil) return if (h eq null) Nil else h
-      } while (h eq null)
+        h eq null
+      }) ()
       var t = h
       // Remaining elements
-      do {
+      while ({
         val x: Any = pf.applyOrElse(rest.head, List.partialNotApplied)
         if (x.asInstanceOf[AnyRef] ne List.partialNotApplied) {
           val nx = new ::(x.asInstanceOf[B], Nil)
@@ -255,7 +256,8 @@ sealed abstract class List[+A]
           t = nx
         }
         rest = rest.tail
-      } while (rest ne Nil)
+        rest ne Nil
+      }) ()
       releaseFence()
       h
     }
