@@ -449,10 +449,11 @@ trait Iterator[+A] extends IterableOnce[A] with IterableOnceOps[A, Iterator, Ite
     private[this] var hdDefined: Boolean = false
 
     def hasNext: Boolean = hdDefined || {
-      do {
+      while ({
         if (!self.hasNext) return false
         hd = self.next()
-      } while (p(hd) == isFlipped)
+        p(hd) == isFlipped
+      }) {}
       hdDefined = true
       true
     }
