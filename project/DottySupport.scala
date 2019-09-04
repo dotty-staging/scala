@@ -18,6 +18,7 @@ object DottySupport {
     Option(System.getProperty("scala.build.compileWithDotty")).map(_.toBoolean).getOrElse(false)
   lazy val commonSettings = Seq(
     scalacOptions ++= Seq(
+      "-Ycompiling-stdlib-213", // Make Dotty aware of the 2.13 standard library
       "-Ynew-collections", // Make Dotty aware of the 2.13 collections
       "-language:implicitConversions" // Avoid a million warnings
     )
