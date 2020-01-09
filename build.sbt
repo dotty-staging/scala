@@ -6,6 +6,5 @@ lazy val scalap = project
     sourceDirectory in Compile := baseDirectory.value,
     target := (baseDirectory in ThisBuild).value / "target" / thisProject.value.id,
 
-    autoScalaLibrary := false,
     libraryDependencies += "org.scala-lang" % "scala-compiler" % "2.13.0"
   )
