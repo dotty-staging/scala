@@ -241,7 +241,7 @@ sealed abstract class List[+A]
         if (x.asInstanceOf[AnyRef] ne List.partialNotApplied) h = new ::(x.asInstanceOf[B], Nil)
         rest = rest.tail
         if (rest eq Nil) return if (h eq null) Nil else h
-      } 
+      }
       var t = h
       // Remaining elements
       while (rest ne Nil) {
@@ -252,7 +252,7 @@ sealed abstract class List[+A]
           t = nx
         }
         rest = rest.tail
-      } 
+      }
       releaseFence()
       h
     }
@@ -472,11 +472,11 @@ sealed abstract class List[+A]
     result
   }
 
-  override def filter(p: A => Boolean): List[A] = filterImpl(p, isFlipped = false)
+  override def filter(p: A => Boolean): List[A] = filterCommon(p, isFlipped = false)
 
-  override def filterNot(p: A => Boolean): List[A] = filterImpl(p, isFlipped = true)
+  override def filterNot(p: A => Boolean): List[A] = filterCommon(p, isFlipped = true)
 
-  private[this] def filterImpl(p: A => Boolean, isFlipped: Boolean): List[A] = {
+  private[this] def filterCommon(p: A => Boolean, isFlipped: Boolean): List[A] = {
 
     // everything seen so far so far is not included
     @tailrec def noneIn(l: List[A]): List[A] = {
