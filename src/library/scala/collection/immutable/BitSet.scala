@@ -326,7 +326,7 @@ object BitSet extends SpecificIterableFactory[Int, BitSet] {
         }
         if (anyChanges) {
           if (minimumNonZeroIndex == -1) {
-            empty
+            this.empty
           } else if (minimumNonZeroIndex == 0) {
             new BitSet1(currentWord)
           } else if (minimumNonZeroIndex == 1) {
