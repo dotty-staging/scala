@@ -23,6 +23,7 @@ import scala.annotation.unchecked.uncheckedVariance
   * @tparam CC Collection type constructor
   * @tparam C  Collection type
   */
+@annotation.superTrait
 trait StrictOptimizedSortedSetOps[A, +CC[X] <: SortedSet[X], +C <: SortedSetOps[A, CC, C]]
   extends SortedSetOps[A, CC, C]
     with StrictOptimizedSetOps[A, Set, C] {

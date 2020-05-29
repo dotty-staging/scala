@@ -37,6 +37,7 @@ package generic
  *    // == List(2, 4)
  * }}}
  */
+@annotation.superTrait
 trait IsIterableOnce[Repr] {
 
   /** The type of elements we can traverse over (e.g. `Int`). */
