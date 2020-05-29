@@ -111,6 +111,7 @@ import scala.language.higherKinds
  * (Note that in practice the `IsIterable[Range]` instance is already provided by
  * the standard library, and it is defined as an `IsSeq[Range]` instance)
  */
+@annotation.superTrait
 trait IsIterable[Repr] extends IsIterableOnce[Repr] {
 
   /** The type returned by transformation operations that preserve the same elements

@@ -27,6 +27,7 @@ import scala.language.higherKinds
   * @see [[scala.collection.generic.IsIterable]]
   * @tparam Repr Collection type (e.g. `Map[Int, String]`)
   */
+@annotation.superTrait
 trait IsMap[Repr] extends IsIterable[Repr] {
 
   /** The type of keys */

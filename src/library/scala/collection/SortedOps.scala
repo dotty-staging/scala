@@ -14,6 +14,7 @@ package scala.collection
 
 
 /** Base trait for sorted collections */
+@annotation.superTrait
 trait SortedOps[A, +C] {
 
   def ordering: Ordering[A]

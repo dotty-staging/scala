@@ -19,6 +19,7 @@ import scala.language.higherKinds
 /**
   * Trait that overrides operations to take advantage of strict builders.
   */
+@annotation.superTrait
 trait StrictOptimizedSeqOps[+A, +CC[_], +C]
   extends Any
     with SeqOps[A, CC, C]
