@@ -64,6 +64,10 @@ object MimaFilters extends AutoPlugin {
     ProblemFilters.exclude[MissingClassProblem]("scala.annotation.meta.defaultArg"),
     ProblemFilters.exclude[MissingClassProblem]("scala.annotation.meta.superArg"),
     ProblemFilters.exclude[MissingClassProblem]("scala.annotation.meta.superFwdArg"),
+
+    ProblemFilters.exclude[MissingClassProblem]("scala.collection.IndexedSeqSlidingIterator"),
+    ProblemFilters.exclude[NewMixinForwarderProblem]("scala.collection.IndexedSeqOps.sliding"),
+    ProblemFilters.exclude[ReversedMissingMethodProblem]("scala.collection.mutable.ArrayDequeOps.scala$collection$mutable$ArrayDequeOps$$super$sliding"),
   )
 
   override val buildSettings = Seq(
