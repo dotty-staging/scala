@@ -1028,9 +1028,9 @@ self =>
     }
 
     def finishBinaryOp(isExpr: Boolean, opinfo: OpInfo, rhs: Tree): Tree = {
-      import opinfo._
-      val operatorPos: Position = Position.range(rhs.pos.source, offset, offset, offset + operator.length)
-      val pos                   = lhs.pos.union(rhs.pos).union(operatorPos).withEnd(in.lastOffset).withPoint(offset)
+      import opinfo.{lhs, operator, targs, offset}
+      val operatorPos = Position.range(source, offset, offset, offset + operator.length)
+      val pos         = operatorPos.union(lhs.pos).union(rhs.pos).withEnd(in.lastOffset)
 
       if (targs.nonEmpty) {
         val qual = unit.source.sourceAt(lhs.pos)
