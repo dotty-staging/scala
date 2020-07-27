@@ -90,8 +90,6 @@ case class StringContext(parts: String*) {
    *          use of a StringBuilder.
    */
   def s(args: Any*): String = macro ??? // fasttracked to scala.tools.reflect.FastStringInterpolator::interpolateS
-  inline def s(args: Any*): String = ???
-
   object s {
     /** The simple string matcher.
      *
@@ -153,7 +151,6 @@ case class StringContext(parts: String*) {
    *          use of a StringBuilder.
    */
   def raw(args: Any*): String = macro ??? // fasttracked to scala.tools.reflect.FastStringInterpolator::interpolateRaw
-  inline def raw(args: Any*): String = ???
 
   @deprecated("Use the static method StringContext.standardInterpolator instead of the instance method", "2.13.0")
   def standardInterpolator(process: String => String, args: Seq[Any]): String = scStandardInterpolator(process, args, parts)
@@ -194,7 +191,6 @@ case class StringContext(parts: String*) {
    *      `%%` (the literal percent) or `%n` (the platform-specific line separator).
    */
   def f[A >: Any](args: A*): String = macro ??? // fasttracked to scala.tools.reflect.FormatInterpolator::interpolateF
-  inline def f[A >: Any](args: A*): String = ??? // fasttracked to scala.tools.reflect.FormatInterpolator::interpolateF
 }
 
 object StringContext {
