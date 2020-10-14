@@ -81,7 +81,7 @@ object DottySupport {
         updateConfiguration.value,
         (update / unresolvedWarningConfiguration).value,
         streams.value.log,
-        scalaOrganization.value %% "dotty-library" % scalaVersion.value)
+        scalaOrganization.value %% "scala3-library" % scalaVersion.value)
 
       FileFunction.cached(cacheDir / s"fetchDottyLibrarySource",
         FilesInfo.lastModified, FilesInfo.exists) { dependencies =>
