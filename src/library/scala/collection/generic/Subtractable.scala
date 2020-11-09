@@ -27,7 +27,7 @@ import scala.collection.IterableOnce
   *  @define   Coll Subtractable
   */
 @deprecated("Subtractable is deprecated. This is now implemented as part of SetOps, MapOps, etc.", "2.13.0")
-@annotation.superTrait
+@annotation.mixin
 trait Subtractable[A, +Repr <: Subtractable[A, Repr]] { self =>
 
   /** The representation object of type `Repr` which contains the collection's elements

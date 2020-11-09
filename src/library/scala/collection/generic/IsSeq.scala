@@ -25,7 +25,7 @@ import scala.reflect.ClassTag
   *
   * @see [[scala.collection.generic.IsIterable]]
   */
-@annotation.superTrait
+@annotation.mixin
 trait IsSeq[Repr] extends IsIterable[Repr] {
 
   @deprecated("'conversion' is now a method named 'apply'", "2.13.0")
