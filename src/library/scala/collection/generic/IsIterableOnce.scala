@@ -37,7 +37,7 @@ package generic
  *    // == List(2, 4)
  * }}}
  */
-@annotation.mixin
+@annotation.transparentTrait
 trait IsIterableOnce[Repr] {
 
   /** The type of elements we can traverse over (e.g. `Int`). */

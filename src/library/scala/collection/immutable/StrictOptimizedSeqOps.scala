@@ -15,9 +15,9 @@ package collection
 package immutable
 
 /**
-  * Trait that overrides operations to take advantage of strict builders.
-  */
-@annotation.mixin
+ * Trait that overrides operations to take advantage of strict builders.
+ */
+@annotation.transparentTrait
 trait StrictOptimizedSeqOps[+A, +CC[_], +C]
   extends Any
     with SeqOps[A, CC, C]

@@ -14,7 +14,7 @@ package scala.collection
 
 
 /** Base trait for sorted collections */
-@annotation.mixin
+@annotation.transparentTrait
 trait SortedOps[A, +C] {
 
   def ordering: Ordering[A]

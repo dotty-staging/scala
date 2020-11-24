@@ -109,7 +109,7 @@ package generic
  * (Note that in practice the `IsIterable[Range]` instance is already provided by
  * the standard library, and it is defined as an `IsSeq[Range]` instance)
  */
-@annotation.mixin
+@annotation.transparentTrait
 trait IsIterable[Repr] extends IsIterableOnce[Repr] {
 
   /** The type returned by transformation operations that preserve the same elements
