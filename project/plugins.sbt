@@ -1,5 +1,8 @@
 scalacOptions ++= Seq("-unchecked", "-feature", "-deprecation",
-  "-Xlint:-unused,_", "-Xfatal-warnings")
+  "-Xlint:-unused,_",
+  // temporary removed, until this build has migrated to sbt slash syntax
+  //"-Xfatal-warnings" 
+)
 
 libraryDependencies += "org.apache.commons" % "commons-lang3" % "3.3.2"
 
@@ -32,11 +35,5 @@ Global / concurrentRestrictions := Seq(
 addSbtPlugin("pl.project13.scala" % "sbt-jmh" % "0.3.3")
 
 addSbtPlugin("de.heikoseeberger" % "sbt-header" % "5.0.0")
-
-// See DottySupport.scala
-if (Option(System.getProperty("scala.build.compileWithDotty")).map(_.toBoolean).getOrElse(false))
-  Seq(addSbtPlugin("ch.epfl.lamp" % "sbt-dotty" % "0.4.6"))
-else
-  Seq()
 
 addSbtPlugin("com.lightbend" % "sbt-whitesource" % "0.1.18")
