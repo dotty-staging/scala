@@ -31,7 +31,7 @@ object Dotc extends Script.Command {
         "-d", out,
         "-classpath", classpath,
         "-deprecation",
-        "-language:experimental.erasedTerms",
+        "-language:experimental.erasedDefinitions",
         "-Xfatal-warnings",
         "-usejavacp"
       ) ++ additionalSettings ++ sources

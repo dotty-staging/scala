@@ -48,7 +48,7 @@ object DottySupport {
     },
 
     Compile / scalacOptions ++= Seq(
-      "-language:experimental.erasedTerms" // needed to compile scala3-library
+      "-language:experimental.erasedDefinitions" // needed to compile scala3-library
     ),
 
     // Some files shouldn't be compiled
