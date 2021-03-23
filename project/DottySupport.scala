@@ -47,10 +47,6 @@ object DottySupport {
       beforeSourcepath ++ ("-sourcepath" :: newSourcepath :: afterSourcePath)
     },
 
-    Compile / scalacOptions ++= Seq(
-      "-language:experimental.erasedDefinitions" // needed to compile scala3-library
-    ),
-
     // Some files shouldn't be compiled
     unmanagedSources / excludeFilter ~= (old =>
       old ||
