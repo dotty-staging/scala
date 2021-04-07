@@ -163,6 +163,7 @@ trait Types
     override def upperBound = underlying.upperBound
     override def parents = underlying.parents
     override def prefix = underlying.prefix
+    override def prefixDirect = underlying.prefixDirect
     override def decls = underlying.decls
     override def baseType(clazz: Symbol) = underlying.baseType(clazz)
     override def baseTypeSeq = underlying.baseTypeSeq
@@ -239,7 +240,7 @@ trait Types
         }
         // erasure screws up all ThisTypes for modules into PackageTypeRefs
         // we need to unscrew them, or certain typechecks will fail mysteriously
-        // http://groups.google.com/group/scala-internals/browse_thread/thread/6d3277ae21b6d581
+        // https://groups.google.com/group/scala-internals/browse_thread/thread/6d3277ae21b6d581
         result = result.map(tpe => tpe match {
           case tpe: PackageTypeRef => ThisType(tpe.sym)
           case _ => tpe
@@ -424,6 +425,12 @@ trait Types
     /** For a typeref or single-type, the prefix of the normalized type (@see normalize).
      *  NoType for all other types. */
     def prefix: Type = NoType
+
+    /** The prefix ''directly'' associated with the type.
+     *  In other words, no normalization is performed: if this is an alias type,
+     *  the prefix returned is that of the alias, not the underlying type.
+     */
+    def prefixDirect: Type = prefix
 
     /** A chain of all typeref or singletype prefixes of this type, longest first.
      *  (Only used from safeToString.)
@@ -1495,13 +1502,16 @@ trait Types
     }
   }
 
-  protected def defineUnderlyingOfSingleType(tpe: SingleType) = {
+  protected def defineUnderlyingOfSingleType(tpe: SingleType): Unit = {
     val period = tpe.underlyingPeriod
     if (period != currentPeriod) {
       tpe.underlyingPeriod = currentPeriod
       if (!isValid(period)) {
         // [Eugene to Paul] needs review
-        tpe.underlyingCache = if (tpe.sym == NoSymbol) ThisType(rootMirror.RootClass) else tpe.pre.memberType(tpe.sym).resultType
+        tpe.underlyingCache = if (tpe.sym == NoSymbol) ThisType(rootMirror.RootClass) else {
+          val result = tpe.pre.memberType(tpe.sym).resultType
+          if (isScalaRepeatedParamType(result)) repeatedToSeq(result) else result
+        }
         assert(tpe.underlyingCache ne tpe, tpe)
       }
     }
@@ -1565,7 +1575,7 @@ trait Types
       (if (emptyLowerBound) "" else " >: " + typeString(lo)) +
       (if (emptyUpperBound) "" else " <: " + typeString(hi))
     }
-    /** Bounds notation used in http://adriaanm.github.com/files/higher.pdf.
+    /** Bounds notation used in https://adriaanm.github.com/files/higher.pdf.
       * For example *(scala.collection.generic.Sorted[K,This]).
       */
     private[internal] def starNotation(typeString: Type => String): String = {
@@ -2435,7 +2445,7 @@ trait Types
 
 
     // interpret symbol's info in terms of the type's prefix and type args
-    protected def relativeInfo: Type = appliedType(sym.info.asSeenFrom(pre, sym.owner), argsOrDummies)
+    protected def relativeInfo: Type = appliedType(sym.info.asSeenFrom(pre, sym.owner), args)
 
     // @M: propagate actual type params (args) to `tp`, by replacing
     // formal type parameters with actual ones. If tp is higher kinded,
@@ -2580,6 +2590,7 @@ trait Types
 
     override def baseTypeSeqDepth = baseTypeSeq.maxDepth
     override def prefix           = pre
+    override def prefixDirect     = pre
     override def termSymbol       = super.termSymbol
     override def termSymbolDirect = super.termSymbol
     override def typeArgs         = args
@@ -4558,9 +4569,9 @@ trait Types
     if (isRawType(tp)) rawToExistential(tp)
     else tp.normalize match {
       // Unify the representations of module classes
-      case st@SingleType(_, sym) if sym.isModule => st.underlying.normalize
-      case st@ThisType(sym) if sym.isModuleClass => normalizePlus(st.underlying)
-      case _ => tp.normalize
+      case st @ SingleType(_, _) if st.typeSymbol.isModuleClass => st.underlying.normalize
+      case st @ ThisType(sym) if sym.isModuleClass              => normalizePlus(st.underlying)
+      case tpNorm                                               => tpNorm
     }
   }
 
@@ -4752,7 +4763,7 @@ trait Types
   /** def isNonValueType(tp: Type) = !isValueElseNonValue(tp) */
 
   def isNonRefinementClassType(tpe: Type) = tpe match {
-    case SingleType(_, sym) => sym.isModuleOrModuleClass
+    case SingleType(_, sym) => sym.isModuleClass
     case TypeRef(_, sym, _) => sym.isClass && !sym.isRefinementClass
     case ErrorType          => true
     case _                  => false

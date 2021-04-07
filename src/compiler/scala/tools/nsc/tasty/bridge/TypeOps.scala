@@ -77,7 +77,7 @@ trait TypeOps { self: TastyUniverse =>
 
     final val ChildAnnot: Symbol = u.definitions.ChildAnnotationClass
     final val RepeatedAnnot: Symbol = u.definitions.RepeatedAnnotationClass
-    final val AlphaAnnotationClass: Symbol = u.definitions.AlphaAnnotationClass
+    final val TargetNameAnnotationClass: Symbol = u.definitions.TargetNameAnnotationClass
     final val StaticMethodAnnotationClass: Symbol = u.definitions.StaticMethodAnnotationClass
 
     object PolyFunctionType {
@@ -104,6 +104,18 @@ trait TypeOps { self: TastyUniverse =>
     private[bridge] def CopyInfo(underlying: u.TermSymbol, originalFlagSet: TastyFlagSet): TastyRepr =
       new CopyCompleter(underlying, originalFlagSet)
 
+    def OpaqueTypeToBounds(tpe: Type): (Type, Type) = tpe match {
+      case u.PolyType(tparams, tpe) =>
+        val (bounds, alias) = OpaqueTypeToBounds(tpe)
+        (u.PolyType(tparams, bounds), u.PolyType(tparams, alias))
+
+      case tpe: OpaqueTypeBounds => (tpe, tpe.alias)
+
+      case _ =>
+        // An alias opaque type is defined as IDENTtpt with a simple type, so has no bounds
+        (u.TypeBounds.empty, tpe)
+
+    }
     def ByNameType(arg: Type): Type = u.definitions.byNameType(arg)
     def TypeBounds(lo: Type, hi: Type): Type = u.TypeBounds.apply(lo, hi)
     def SingleType(pre: Type, sym: Symbol): Type = u.singleType(pre, sym)
@@ -334,7 +346,7 @@ trait TypeOps { self: TastyUniverse =>
   }
 
   private val SyntheticScala3Type =
-    raw"^(?:&|\||AnyKind|(?:Context)?Function\d+|\*:|Tuple)$$".r
+    raw"^(?:&|\||AnyKind|(?:Context)?Function\d+|\*:|Tuple|Matchable)$$".r
 
   def selectType(name: TastyName.TypeName, prefix: Type)(implicit ctx: Context): Type = selectType(name, prefix, prefix)
   def selectType(name: TastyName.TypeName, prefix: Type, space: Type)(implicit ctx: Context): Type = {
@@ -353,6 +365,7 @@ trait TypeOps { self: TastyUniverse =>
           case tpnme.TupleCons                                        => genTupleIsUnsupported("scala.*:")
           case tpnme.Tuple               if !ctx.mode.is(ReadParents) => genTupleIsUnsupported("scala.Tuple")
           case tpnme.AnyKind                                          => u.definitions.AnyTpe
+          case tpnme.Matchable                                        => u.definitions.AnyTpe
           case _                                                      => lookupType
         }
 
@@ -472,6 +485,8 @@ trait TypeOps { self: TastyUniverse =>
       case tpe               => u.TypeBounds.upper(tpe)
     }
   }
+
+  private[bridge] final class OpaqueTypeBounds(lo: Type, hi: Type, val alias: Type) extends u.TypeBounds(lo, hi)
 
   def typeRef(tpe: Type): Type = u.appliedType(tpe, Nil)
 

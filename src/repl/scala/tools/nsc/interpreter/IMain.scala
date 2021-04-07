@@ -735,7 +735,10 @@ class IMain(val settings: Settings, parentClassLoaderOverride: Option[ClassLoade
       compile(new CompilationUnit(new BatchSourceFile(label, packaged(code))))
 
     def compile(unit: CompilationUnit): Boolean = {
+      val oldRunReporting = currentRun.reporting
       val run = new Run()
+      // The unit is already parsed and won't be parsed again. This makes sure suspended warnings are not discarded.
+      run.reporting.initFrom(oldRunReporting)
       assert(run.typerPhase != NoPhase, "REPL requires a typer phase.")
 
       run.compileUnits(unit :: Nil)
@@ -794,12 +797,16 @@ class IMain(val settings: Settings, parentClassLoaderOverride: Option[ClassLoade
     }
 
     // Wrap last tree in a valdef to give user a nice handle for it (`resN`)
-    val trees: List[Tree] =
-      origTrees.init :+ (origTrees.last match {
-        case tree@(_: Assign) => tree
-        case tree@(_: RefTree | _: TermTree) => storeInVal(tree)
-        case tree => tree
-      })
+    val trees: List[Tree] = origTrees.init :+ {
+      val tree = origTrees.last
+      @tailrec def loop(scrut: Tree): Tree = scrut match {
+        case _: Assign                => tree
+        case _: RefTree | _: TermTree => storeInVal(tree)
+        case Annotated(_, arg)        => loop(arg)
+        case _                        => tree
+      }
+      loop(tree)
+    }
 
     /** handlers for each tree in this request */
     val handlers: List[MemberHandler] = trees map (memberHandlers chooseHandler _)

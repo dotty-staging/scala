@@ -1546,22 +1546,14 @@ self =>
       case TRY =>
         def parseTry = atPos(in.skipToken()) {
           val body = expr()
-          def catchFromExpr() = List(makeCatchFromExpr(expr()))
-          val catches: List[CaseDef] =
-            if (in.token != CATCH) Nil
-            else {
-              in.nextToken()
-              if (in.token != LBRACE) catchFromExpr()
-              else inBracesOrNil {
-                if (in.token == CASE) caseClauses()
-                else catchFromExpr()
-              }
-            }
+          val handler: List[CaseDef] =
+            if (in.token == CATCH) { in.nextToken(); makeMatchFromExpr(expr()) }
+            else Nil
           val finalizer = in.token match {
             case FINALLY => in.nextToken() ; expr()
             case _       => EmptyTree
           }
-          Try(body, catches, finalizer)
+          Try(body, handler, finalizer)
         }
         parseTry
       case WHILE =>
@@ -1920,9 +1912,13 @@ self =>
       enums.toList
     }
 
-    def enumerator(isFirst: Boolean, allowNestedIf: Boolean = true): List[Tree] =
-      if (in.token == IF && !isFirst) makeFilter(in.offset, guard()) :: Nil
+    def enumerator(isFirst: Boolean, allowNestedIf: Boolean = true): List[Tree] = {
+      def loop(): List[Tree] =
+        if (in.token != IF) Nil
+        else makeFilter(in.offset, guard()) :: loop()
+      if (in.token == IF && !isFirst) loop()
       else generator(!isFirst, allowNestedIf)
+    }
 
     /** {{{
      *  Generator ::= Pattern1 (`<-` | `=`) Expr [Guard]
@@ -2693,10 +2689,10 @@ self =>
       in.nextToken()
       val lhs = commaSeparated(stripParens(noSeq.pattern2()))
       val tp = typedOpt()
-      val rhs =
+      val (rhs, rhsPos) =
         if (!tp.isEmpty && in.token != EQUALS) {
           newmods = newmods | Flags.DEFERRED
-          EmptyTree
+          (EmptyTree, NoPosition)
         } else {
           accept(EQUALS)
           expr() match {
@@ -2708,14 +2704,14 @@ self =>
               }
               placeholderParams = placeholderParams.tail
               newmods = newmods | Flags.DEFAULTINIT
-              EmptyTree
-            case x => x
+              (EmptyTree, x.pos)
+            case x => (x, x.pos)
           }
         }
       def mkDefs(p: Tree, tp: Tree, rhs: Tree): List[Tree] = {
         val trees = {
           val pat = if (tp.isEmpty) p else Typed(p, tp) setPos (p.pos union tp.pos)
-          makePatDef(newmods, pat, rhs)
+          makePatDef(newmods, pat, rhs, rhsPos)
         }
         if (newmods.isDeferred) {
           trees match {

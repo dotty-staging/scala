@@ -17,8 +17,9 @@ import scala.collection.{Factory, immutable, mutable}
 import mutable.ArrayBuilder
 import immutable.ArraySeq
 import scala.language.implicitConversions
-import scala.reflect.ClassTag
+import scala.reflect.{ClassTag, classTag}
 import scala.runtime.BoxedUnit
+import scala.runtime.ScalaRunTime
 import scala.runtime.ScalaRunTime.{array_apply, array_update}
 
 /** Utility methods for operating on arrays.
@@ -182,13 +183,23 @@ object Array {
   // Subject to a compiler optimization in Cleanup.
   // Array(e0, ..., en) is translated to { val a = new Array(3); a(i) = ei; a }
   def apply[T: ClassTag](xs: T*): Array[T] = {
-    val array = new Array[T](xs.length)
-    val iterator = xs.iterator
-    var i = 0
-    while (iterator.hasNext) {
-      array(i) = iterator.next(); i += 1
+    val len = xs.length
+    xs match {
+      case wa: immutable.ArraySeq[_] if wa.unsafeArray.getClass.getComponentType == classTag[T].runtimeClass =>
+        // We get here in test/files/run/sd760a.scala, `Array[T](t)` for
+        // a specialized type parameter `T`. While we still pay for two
+        // copies of the array it is better than before when we also boxed
+        // each element when populating the result.
+        ScalaRunTime.array_clone(wa.unsafeArray).asInstanceOf[Array[T]]
+      case _ =>
+        val array = new Array[T](len)
+        val iterator = xs.iterator
+        var i = 0
+        while (iterator.hasNext) {
+          array(i) = iterator.next(); i += 1
+        }
+        array
     }
-    array
   }
 
   /** Creates an array of `Boolean` objects */
@@ -535,21 +546,28 @@ object Array {
     }
   }
 
-  def equals(xs: Array[AnyRef], ys: Array[AnyRef]): Boolean = {
-    if (xs eq ys)
-      return true
-    if (xs.length != ys.length)
-      return false
-
-    val len = xs.length
-    var i = 0
-    while (i < len) {
-      if (xs(i) != ys(i))
-        return false
-      i += 1
+  /** Compare two arrays per element.
+   *
+   *  A more efficient version of `xs.sameElements(ys)`.
+   *
+   *  Note that arrays are invariant in Scala, but it may
+   *  be sound to cast an array of arbitrary reference type
+   *  to `Array[AnyRef]`. Arrays on the JVM are covariant
+   *  in their element type.
+   *
+   *  `Array.equals(xs.asInstanceOf[Array[AnyRef]], ys.asInstanceOf[Array[AnyRef]])`
+   *
+   *  @param xs an array of AnyRef
+   *  @param ys an array of AnyRef
+   *  @return true if corresponding elements are equal
+   */
+  def equals(xs: Array[AnyRef], ys: Array[AnyRef]): Boolean =
+    (xs eq ys) ||
+    (xs.length == ys.length) && {
+      var i = 0
+      while (i < xs.length && xs(i) == ys(i)) i += 1
+      i >= xs.length
     }
-    true
-  }
 
   /** Called in a pattern match like `{ case Array(x,y,z) => println('3 elements')}`.
    *
@@ -559,7 +577,7 @@ object Array {
   def unapplySeq[T](x: Array[T]): UnapplySeqWrapper[T] = new UnapplySeqWrapper(x)
 
   final class UnapplySeqWrapper[T](private val a: Array[T]) extends AnyVal {
-    def isEmpty: Boolean = false
+    def isEmpty: false = false
     def get: UnapplySeqWrapper[T] = this
     def lengthCompare(len: Int): Int = a.lengthCompare(len)
     def apply(i: Int): T = a(i)
@@ -604,9 +622,9 @@ object Array {
  *  by converting to `ArraySeq` first and invoking the variant of `reverse` that returns another
  *  `ArraySeq`.
  *
- *  @see [[http://www.scala-lang.org/files/archive/spec/2.13/ Scala Language Specification]], for in-depth information on the transformations the Scala compiler makes on Arrays (Sections 6.6 and 6.15 respectively.)
- *  @see [[http://docs.scala-lang.org/sips/completed/scala-2-8-arrays.html "Scala 2.8 Arrays"]] the Scala Improvement Document detailing arrays since Scala 2.8.
- *  @see [[http://docs.scala-lang.org/overviews/collections/arrays.html "The Scala 2.8 Collections' API"]] section on `Array` by Martin Odersky for more information.
+ *  @see [[https://www.scala-lang.org/files/archive/spec/2.13/ Scala Language Specification]], for in-depth information on the transformations the Scala compiler makes on Arrays (Sections 6.6 and 6.15 respectively.)
+ *  @see [[https://docs.scala-lang.org/sips/completed/scala-2-8-arrays.html "Scala 2.8 Arrays"]] the Scala Improvement Document detailing arrays since Scala 2.8.
+ *  @see [[https://docs.scala-lang.org/overviews/collections/arrays.html "The Scala 2.8 Collections' API"]] section on `Array` by Martin Odersky for more information.
  *  @hideImplicitConversion scala.Predef.booleanArrayOps
  *  @hideImplicitConversion scala.Predef.byteArrayOps
  *  @hideImplicitConversion scala.Predef.charArrayOps

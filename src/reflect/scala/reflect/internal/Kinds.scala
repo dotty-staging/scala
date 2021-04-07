@@ -140,7 +140,8 @@ trait Kinds {
       param:         Symbol,
       paramOwner:    Symbol,
       underHKParams: List[Symbol],
-      withHKArgs:    List[Symbol]
+      withHKArgs:    List[Symbol],
+      flip:          Boolean
     ): KindErrors = {
 
       var kindErrors: KindErrors = NoKindErrors
@@ -165,7 +166,9 @@ trait Kinds {
       }
       else foreach2(hkargs, hkparams) { (hkarg, hkparam) =>
         if (hkparam.typeParams.isEmpty && hkarg.typeParams.isEmpty) { // base-case: kind *
-          kindCheck(variancesMatch(hkarg, hkparam), _.varianceError(hkarg -> hkparam))
+          if (flip) kindCheck(variancesMatch(hkparam, hkarg), _.varianceError(hkparam -> hkarg))
+          else kindCheck(variancesMatch(hkarg, hkparam), _.varianceError(hkarg -> hkparam))
+
           // instantiateTypeParams(tparams, targs)
           //   higher-order bounds, may contain references to type arguments
           // substSym(hkparams, hkargs)
@@ -179,7 +182,8 @@ trait Kinds {
           val declaredBoundsInst = declaredBounds.substSym(underHKParams, withHKArgs).asSeenFrom(pre, owner)
           val argumentBounds     = hkarg.info.bounds.asSeenFrom(argPre, argOwner).asSeenFrom(pre, owner)
 
-          kindCheck(declaredBoundsInst <:< argumentBounds, _.strictnessError(hkarg -> hkparam))
+          if (flip) kindCheck(argumentBounds <:< declaredBoundsInst, _.strictnessError(hkparam -> hkarg))
+          else kindCheck(declaredBoundsInst <:< argumentBounds, _.strictnessError(hkarg -> hkparam))
 
           debuglog(
             "checkKindBoundsHK base case: " + hkparam +
@@ -200,7 +204,8 @@ trait Kinds {
             hkparam,
             paramOwner,
             underHKParams ++ hkparam.typeParams,
-            withHKArgs ++ hkarg.typeParams
+            withHKArgs ++ hkarg.typeParams,
+            !flip
           )
         }
         if (!explainErrors && !kindErrors.isEmpty)
@@ -219,15 +224,17 @@ trait Kinds {
       // Prevent WildcardType from causing kind errors, as typevars may be higher-order
       if (targ == WildcardType) Nil else {
         // NOTE: *not* targ.typeSymbol, which normalizes
-        val targSym = targ.typeSymbolDirect
-        // force symbol load for #4205
-        targSym.info
+        // force initialize symbol for scala/bug#4205
+        val targSym = targ.typeSymbolDirect.initialize
+        // NOTE: *not* targ.prefix, which normalizes
+        val targPre = targ.prefixDirect
         // @M must use the typeParams of the *type* targ, not of the *symbol* of targ!!
         val tparamsHO = targ.typeParams
         if (targ.isHigherKinded || tparam.typeParams.nonEmpty) {
           val kindErrors = checkKindBoundsHK(
-            tparamsHO, targSym, targ.prefix, targSym.owner,
-            tparam, tparam.owner, tparam.typeParams, tparamsHO
+            tparamsHO, targSym, targPre, targSym.owner,
+            tparam, tparam.owner, tparam.typeParams, tparamsHO,
+            flip = false
           )
           if (kindErrors.isEmpty) Nil else {
             if (explainErrors) List((targ, tparam, kindErrors))
@@ -261,7 +268,7 @@ trait Kinds {
      */
     def scalaNotation: String
 
-    /** Kind notation used in http://adriaanm.github.com/files/higher.pdf.
+    /** Kind notation used in https://adriaanm.github.com/files/higher.pdf.
      * Proper types are expressed as *.
      * Type constructors are expressed * -> *(lo, hi) -(+)-> *.
      */

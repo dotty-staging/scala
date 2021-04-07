@@ -1,10 +1,9 @@
 package scala.tools.nsc.interpreter
 
-import java.io.{PrintWriter, StringWriter}
-
 import org.junit.Assert.{assertEquals, assertTrue}
 import org.junit.Test
 
+import java.io.{PrintWriter, StringWriter}
 import scala.reflect.internal.util.{BatchSourceFile, SourceFile}
 import scala.tools.nsc.Settings
 import scala.tools.nsc.interpreter.shell._
@@ -34,6 +33,28 @@ class CompletionTest {
     val acc = new Accumulator
     val completer = new ReplCompletion(intp, acc)
     (completer, intp, acc)
+  }
+
+  private def commandInterpretLines(): (Completion, Repl, Accumulator) = {
+    val intp = newIMain()
+    class CommandMock extends LoopCommands {
+      override protected def echo(msg: String): Unit = ???
+      override protected def out: PrintWriter = ???
+      override def commands: List[LoopCommand] = {
+        val default = (string: String) => Result.default
+        List(
+          LoopCommand.cmd("paste", "[-raw] [path]", "enter paste mode or paste a file", default),
+          LoopCommand.cmd("paste", "[-raw] [path]", "enter paste mode or paste a file", default)// Other commands
+          )
+      }
+    }
+    val acc             = new Accumulator
+    val shellCompletion = new Completion {
+      override def complete(buffer: String, cursor: Int) =
+        if (buffer.startsWith(":")) new CommandMock().colonCompletion(buffer, cursor).complete(buffer, cursor)
+        else NoCompletions
+    }
+    (shellCompletion, intp, acc)
   }
 
   implicit class BeforeAfterCompletion(completion: Completion) {
@@ -215,6 +236,53 @@ class CompletionTest {
     val candidates2 = completer.complete("Stuff.th").candidates
     assertEquals(2, candidates2.size)
     assertTrue(candidates2.forall(_.isDeprecated))
+  }
+
+  @Test
+  def isDeprecatedOverrideMethod(): Unit = {
+    val (completer, _, _) = interpretLines(
+      """object Stale { def oldie(i: Int) = ???; @deprecated("","") def oldie = ??? }"""
+      )
+    val candidates1 = completer.complete("Stale.ol").candidates
+    assertEquals(2, candidates1.size)
+    assertEquals(candidates1.head.isDeprecated, false)
+    assertEquals(candidates1.last.isDeprecated, false)
+  }
+
+  @Test
+  def isDeprecatedOverrideMethodDefString(): Unit = {
+    val (completer, _, _) = interpretLines(
+      """object Stale { def oldie(i: Int) = ???; @deprecated("","") def oldie = ??? }"""
+      )
+    val candidates1 = completer.complete("Stale.oldie").candidates
+    assertEquals(3, candidates1.size)
+    assertEquals(candidates1.filter(_.isDeprecated).map(_.defString.contains("deprecated")).head, true)
+    assertEquals(candidates1.last.isDeprecated, false)
+  }
+
+  @Test
+  def isDeprecatedInMethodDesc(): Unit = {
+    val (completer, _, _) = interpretLines(
+      """object Stale { @deprecated("","") def oldie = ??? }""",
+      """object Stuff { @deprecated("","") def `this` = ??? ; @deprecated("","") def `that` = ??? }"""
+      )
+    val candidates1 = completer.complete("Stale.oldie").candidates
+    assertEquals(2, candidates1.size) // When exactly matched, there is an empty character
+    assertTrue(candidates1.filter(_.defString.contains("oldie")).head.defString.contains("deprecated"))
+    val candidates2 = completer.complete("Stuff.that").candidates
+    assertEquals(2, candidates2.size)
+    assertTrue(candidates2.filter(_.defString.contains("that")).head.defString.contains("deprecated"))
+  }
+
+  @Test
+  def jline3Matcher(): Unit = {
+    val (completer, _, _) = commandInterpretLines()
+    val candidates1 = completer.complete(":p").candidates
+    assertEquals(2, candidates1.size)
+
+    // Save the line to the CompletionResult of the matcher, and select the command to match successfully.
+    val completionResult = completer.complete(":p")
+    assertEquals(completionResult.line, ":p")
   }
 
   @Test

@@ -200,10 +200,10 @@ class ILoop(config: ShellConfig, inOverride: BufferedReader = null,
     cmd("load", "<path>", "interpret lines in a file", loadCommand, fileCompletion),
     cmd("paste", "[-raw] [path]", "enter paste mode or paste a file", pasteCommand, fileCompletion),
     nullary("power", "enable power user mode", () => powerCmd()),
-    nullary("quit", "exit the interpreter", () => Result(keepRunning = false, None)),
-    cmd("replay", "[options]", "reset the repl and replay all previous commands", replayCommand, settingsCompletion),
+    nullary("quit", "exit the REPL", () => Result(keepRunning = false, None)),
+    cmd("replay", "[options]", "reset the REPL and replay all previous commands", replayCommand, settingsCompletion),
     cmd("require", "<path>", "add a jar to the classpath", require),
-    cmd("reset", "[options]", "reset the repl to its initial state, forgetting all session entries", resetCommand, settingsCompletion),
+    cmd("reset", "[options]", "reset the REPL to its initial state, forgetting all session entries", resetCommand, settingsCompletion),
     cmd("save", "<path>", "save replayable session to a file", saveCommand, fileCompletion),
     shCommand,
     cmd("settings", "<options>", "update compiler options, if possible; see reset", changeSettings, settingsCompletion),
@@ -223,15 +223,15 @@ class ILoop(config: ShellConfig, inOverride: BufferedReader = null,
     val emptyWord    = """(\s+)$""".r.unanchored
     val directorily  = """(\S*/)$""".r.unanchored
     val trailingWord = """(\S+)$""".r.unanchored
-    def listed(i: Int, dir: Option[Path]) =
+    def listed(buffer: String, i: Int, dir: Option[Path]) =
       dir.filter(_.isDirectory)
-        .map(d => CompletionResult(i, d.toDirectory.list.map(x => CompletionCandidate(x.name)).toList))
+        .map(d => CompletionResult(buffer, i, d.toDirectory.list.map(x => CompletionCandidate(x.name)).toList))
         .getOrElse(NoCompletions)
     def listedIn(dir: Directory, name: String) = dir.list.filter(_.name.startsWith(name)).map(_.name).toList
     def complete(buffer: String, cursor: Int): CompletionResult =
       buffer.substring(0, cursor) match {
-        case emptyWord(s)        => listed(cursor, Directory.Current)
-        case directorily(s)      => listed(cursor, Option(Path(s)))
+        case emptyWord(s)        => listed(buffer, cursor, Directory.Current)
+        case directorily(s)      => listed(buffer, cursor, Option(Path(s)))
         case trailingWord(s) =>
           val f = File(s)
           val (i, maybes) =
@@ -239,7 +239,7 @@ class ILoop(config: ShellConfig, inOverride: BufferedReader = null,
             else if (f.isDirectory) (cursor - s.length, List(s"${f.toAbsolute.path}/"))
             else if (f.parent.exists) (cursor - f.name.length, listedIn(f.parent.toDirectory, f.name))
             else (-1, Nil)
-          if (maybes.isEmpty) NoCompletions else CompletionResult(i, maybes.map(CompletionCandidate(_)))
+          if (maybes.isEmpty) NoCompletions else CompletionResult(buffer, i, maybes.map(CompletionCandidate(_)))
         case _                   => NoCompletions
       }
   }
@@ -253,7 +253,7 @@ class ILoop(config: ShellConfig, inOverride: BufferedReader = null,
           val maybes = intp.visibleSettings.filter(_.name.startsWith(s)).map(_.name)
                                .filterNot(cond(_) { case "-"|"-X"|"-Y" => true }).sorted
           if (maybes.isEmpty) NoCompletions
-          else CompletionResult(cursor - s.length, maybes.map(CompletionCandidate(_)))
+          else CompletionResult(buffer, cursor - s.length, maybes.map(CompletionCandidate(_)))
         case _ => NoCompletions
       }
     }
@@ -512,7 +512,7 @@ class ILoop(config: ShellConfig, inOverride: BufferedReader = null,
    */
   def resetCommand(line: String): Unit = {
     def run(destructive: Boolean): Unit = {
-      echo("Resetting interpreter state.")
+      echo("Resetting REPL state.")
       if (replayCommandStack.nonEmpty) {
         echo("Forgetting this session history:\n")
         replayCommands foreach echo
@@ -978,29 +978,30 @@ class ILoop(config: ShellConfig, inOverride: BufferedReader = null,
 object ILoop {
   implicit def loopToInterpreter(repl: ILoop): Repl = repl.intp
 
-  def testConfig(settings: Settings) =
-    new ShellConfig {
-      private val delegate = ShellConfig(settings)
+  class TestConfig(delegate: ShellConfig) extends ShellConfig {
+    def filesToPaste: List[String] = delegate.filesToPaste
+    def filesToLoad: List[String] = delegate.filesToLoad
+    def batchText: String = delegate.batchText
+    def batchMode: Boolean = delegate.batchMode
+    def doCompletion: Boolean = delegate.doCompletion
+    def haveInteractiveConsole: Boolean = delegate.haveInteractiveConsole
 
-      val filesToPaste: List[String] = delegate.filesToPaste
-      val filesToLoad: List[String] = delegate.filesToLoad
-      val batchText: String = delegate.batchText
-      val batchMode: Boolean = delegate.batchMode
-      val doCompletion: Boolean = delegate.doCompletion
-      val haveInteractiveConsole: Boolean = delegate.haveInteractiveConsole
+    override val colorOk = delegate.colorOk
 
-      // No truncated output, because the result changes on Windows because of line endings
-      override val maxPrintString = {
-        val p = sys.Prop[Int]("wtf")
-        p.set("0")
-        p
-      }
-    }
+    // No truncated output, because the result changes on Windows because of line endings
+    override val maxPrintString = sys.Prop[Int]("wtf").tap(_.set("0"))
+  }
+  object TestConfig {
+    def apply(settings: Settings) = new TestConfig(ShellConfig(settings))
+  }
 
   // Designed primarily for use by test code: take a String with a
   // bunch of code, and prints out a transcript of what it would look
   // like if you'd just typed it into the repl.
-  def runForTranscript(code: String, settings: Settings, inSession: Boolean = false): String = {
+  def runForTranscript(code: String, settings: Settings, inSession: Boolean = false): String =
+    runForTranscript(code, settings, TestConfig(settings), inSession)
+
+  def runForTranscript(code: String, settings: Settings, config: ShellConfig, inSession: Boolean): String = {
     import java.io.{BufferedReader, OutputStreamWriter, StringReader}
     import java.lang.System.{lineSeparator => EOL}
 
@@ -1028,7 +1029,6 @@ object ILoop {
           }
         }
 
-        val config = testConfig(settings)
         val repl = new ILoop(config, input, output) {
           // remove welcome message as it has versioning info (for reproducible test results),
           override def welcome = ""

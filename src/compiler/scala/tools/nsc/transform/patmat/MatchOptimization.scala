@@ -22,8 +22,7 @@ import scala.tools.nsc.Reporting.WarningCategory
  * The patmat translation doesn't rely on this, so it could be disabled in principle.
  *  - well, not quite: the backend crashes if we emit duplicates in switches (e.g. scala/bug#7290)
  */
-// TODO: split out match analysis
-trait MatchOptimization extends MatchTreeMaking with MatchAnalysis {
+trait MatchOptimization extends MatchTreeMaking with MatchApproximation {
   import global._
   import global.definitions._
 
@@ -43,8 +42,8 @@ trait MatchOptimization extends MatchTreeMaking with MatchAnalysis {
       val testss = approximateMatchConservative(prevBinder, cases)
 
       // interpret:
-      val dependencies    = new mutable.LinkedHashMap[Test, Set[Prop]]
-      val tested          = new mutable.HashSet[Prop]
+      val dependencies    = new mutable.LinkedHashMap[Test, mutable.LinkedHashSet[Prop]]
+      val tested          = new mutable.LinkedHashSet[Prop]
       val reusesMap       = new mutable.LinkedHashMap[Int, Test]
       val reusesTest      = { (test: Test) => reusesMap.get(test.id) }
       val registerReuseBy = { (priorTest: Test, later: Test) =>
@@ -57,32 +56,32 @@ trait MatchOptimization extends MatchTreeMaking with MatchAnalysis {
         val cond = test.prop
 
         def simplify(c: Prop): Set[Prop] = c match {
-          case And(ops)                   => ops.toSet flatMap simplify
+          case And(ops)                   => ops flatMap simplify
           case Or(ops)                    => Set(False) // TODO: make more precise
-          case Not(Eq(Var(_), NullConst)) => Set(True) // not worth remembering
+          case Not(Eq(Var(_), NullConst)) => Set.empty  // not worth remembering
+          case True                       => Set.empty  // same
           case _                          => Set(c)
         }
         val conds = simplify(cond)
 
         if (conds(False)) false // stop when we encounter a definite "no" or a "not sure"
         else {
-          val nonTrivial = conds - True
-          if (!nonTrivial.isEmpty) {
-            tested ++= nonTrivial
+          if (!conds.isEmpty) {
+            tested ++= conds
 
             // is there an earlier test that checks our condition and whose dependencies are implied by ours?
             dependencies find {
               case (priorTest, deps) =>
-                ((simplify(priorTest.prop) == nonTrivial) || // our conditions are implied by priorTest if it checks the same thing directly
-                 (nonTrivial subsetOf deps)                  // or if it depends on a superset of our conditions
-                ) && (deps subsetOf tested)                 // the conditions we've tested when we are here in the match satisfy the prior test, and hence what it tested
+                ((simplify(priorTest.prop) == conds) || // our conditions are implied by priorTest if it checks the same thing directly
+                    (conds subsetOf deps)               // or if it depends on a superset of our conditions
+                ) && (deps subsetOf tested)             // the conditions we've tested when we are here in the match satisfy the prior test, and hence what it tested
             } foreach {
               case (priorTest, _) =>
                 // if so, note the dependency in both tests
                 registerReuseBy(priorTest, test)
             }
 
-            dependencies(test) = tested.toSet // copies
+            dependencies(test) = tested.clone()
           }
           true
         }
@@ -108,7 +107,7 @@ trait MatchOptimization extends MatchTreeMaking with MatchAnalysis {
       val collapsed = testss map { tests =>
         // map tests to the equivalent list of treemakers, replacing shared prefixes by a reusing treemaker
         // if there's no sharing, simply map to the tree makers corresponding to the tests
-        var currDeps = Set[Prop]()
+        var currDeps = mutable.LinkedHashSet.empty[Prop]
         val (sharedPrefix, suffix) = tests span { test =>
           (test.prop == True) || (for(
               reusedTest <- reusesTest(test);
@@ -160,7 +159,7 @@ trait MatchOptimization extends MatchTreeMaking with MatchAnalysis {
       }
 
       // TODO: finer-grained duplication
-      def chainBefore(next: Tree)(casegen: Casegen): Tree = // assert(codegen eq optimizedCodegen)
+      def chainBefore(next: Tree)(casegen: Casegen): Tree =
         atPos(pos)(casegen.flatMapCondStored(cond, storedCond, res, nextBinder, substitution(next).duplicate))
 
       override def toString = "Memo"+((nextBinder.name, storedCond.name, cond, res, substitution))
@@ -206,20 +205,7 @@ trait MatchOptimization extends MatchTreeMaking with MatchAnalysis {
     }
   }
 
-
-  //// DCE
-//  trait DeadCodeElimination extends TreeMakers {
-//    // TODO: non-trivial dead-code elimination
-//    // e.g., the following match should compile to a simple instanceof:
-//    //   case class Ident(name: String)
-//    //   for (Ident(name) <- ts) println(name)
-//    def doDCE(prevBinder: Symbol, cases: List[List[TreeMaker]], pt: Type): List[List[TreeMaker]] = {
-//      // do minimal DCE
-//      cases
-//    }
-//  }
-
-  //// SWITCHES -- TODO: operate on Tests rather than TreeMakers
+  //// SWITCHES
   trait SwitchEmission extends TreeMakers with MatchMonadInterface {
     import treeInfo.isGuardedCase
 
@@ -527,7 +513,7 @@ trait MatchOptimization extends MatchTreeMaking with MatchAnalysis {
         case _ => None
       }}
 
-      def scrutRef(scrut: Symbol): Tree = dealiasWiden(scrut.tpe) match {
+      def scrutRef(scrut: Symbol): Tree = scrut.tpe.dealiasWiden match {
         case subInt if subInt =:= IntTpe =>
           REF(scrut)
         case subInt if definitions.isNumericSubClass(subInt.typeSymbol, IntClass) =>
@@ -557,7 +543,7 @@ trait MatchOptimization extends MatchTreeMaking with MatchAnalysis {
     override def emitSwitch(scrut: Tree, scrutSym: Symbol, cases: List[List[TreeMaker]], pt: Type, matchFailGenOverride: Option[Tree => Tree], unchecked: Boolean): Option[Tree] = { import CODE._
       val regularSwitchMaker = new RegularSwitchMaker(scrutSym, matchFailGenOverride, unchecked)
       // TODO: if patterns allow switch but the type of the scrutinee doesn't, cast (type-test) the scrutinee to the corresponding switchable type and switch on the result
-      if (regularSwitchMaker.switchableTpe(dealiasWiden(scrutSym.tpe))) {
+      if (regularSwitchMaker.switchableTpe(scrutSym.tpe.dealiasWiden)) {
         val caseDefsWithDefault = regularSwitchMaker(cases map {c => (scrutSym, c)}, pt)
         if (caseDefsWithDefault.isEmpty) None // not worth emitting a switch.
         else {
@@ -615,13 +601,8 @@ trait MatchOptimization extends MatchTreeMaking with MatchAnalysis {
                           with SwitchEmission
                           with CommonSubconditionElimination {
     override def optimizeCases(prevBinder: Symbol, cases: List[List[TreeMaker]], pt: Type, selectorPos: Position): (List[List[TreeMaker]], List[Tree]) = {
-      // TODO: do CSE on result of doDCE(prevBinder, cases, pt)
       val optCases = doCSE(prevBinder, cases, pt, selectorPos)
-      val toHoist = (
-        for (treeMakers <- optCases)
-          yield treeMakers.collect{case tm: ReusedCondTreeMaker => tm.treesToHoist}
-        ).flatten.flatten.toList
-      (optCases, toHoist)
+      (optCases, optCases.flatMap(flatCollect(_) { case tm: ReusedCondTreeMaker => tm.treesToHoist }))
     }
   }
 }

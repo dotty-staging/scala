@@ -578,7 +578,7 @@ trait ContextErrors {
         NormalTypeError(tree, "expected annotation of type " + expected + ", found " + found)
 
       def MultipleArgumentListForAnnotationError(tree: Tree) =
-        NormalTypeError(tree, "multiple argument lists on Java annotation or subclass of ConstantAnnotation")
+        NormalTypeError(tree, "multiple argument lists on Java annotation")
 
       def UnknownAnnotationNameError(tree: Tree, name: Name) =
         NormalTypeError(tree, "unknown annotation argument name: " + name)
@@ -587,7 +587,7 @@ trait ContextErrors {
         NormalTypeError(tree, "duplicate value for annotation argument " + name)
 
       def ClassfileAnnotationsAsNamedArgsError(tree: Tree) =
-        NormalTypeError(tree, "arguments to Java annotations or subclasses of ConstantAnnotation have to be supplied as named arguments")
+        NormalTypeError(tree, "arguments to Java annotations have to be supplied as named arguments")
 
       def AnnotationMissingArgError(tree: Tree, annType: Type, sym: Symbol) =
         NormalTypeError(tree, "annotation " + annType.typeSymbol.fullName + " is missing argument " + sym.name)
@@ -1345,9 +1345,6 @@ trait ContextErrors {
 
       def ParentSealedInheritanceError(parent: Tree, psym: Symbol) =
         NormalTypeError(parent, "illegal inheritance from sealed " + psym )
-
-      def RootImportError(tree: Tree) =
-        issueNormalTypeError(tree, "_root_ cannot be imported")
 
       def SymbolValidationError(sym: Symbol, errKind: SymValidateErrors.Value): Unit = {
         val msg = errKind match {

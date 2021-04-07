@@ -854,7 +854,12 @@ trait Scanners extends ScannersCommon {
       } else unclosedStringLit()
     }
 
-    private def unclosedStringLit(): Unit = syntaxError("unclosed string literal")
+    private def unclosedStringLit(seenEscapedQuoteInInterpolation: Boolean = false): Unit = {
+      val note =
+        if (seenEscapedQuoteInInterpolation) "; note that `\\\"` no longer closes single-quoted interpolated string literals since 2.13.6, you can use a triple-quoted string instead"
+        else ""
+      syntaxError(s"unclosed string literal$note")
+    }
 
     private def replaceUnicodeEscapesInTriple(): Unit = 
       if(strVal != null) {
@@ -890,7 +895,8 @@ trait Scanners extends ScannersCommon {
       }
     }
 
-    @tailrec private def getStringPart(multiLine: Boolean): Unit = {
+    // for interpolated strings
+    @tailrec private def getStringPart(multiLine: Boolean, seenEscapedQuote: Boolean = false): Unit = {
       def finishStringPart() = {
         setStrVal()
         token = STRINGPART
@@ -904,18 +910,27 @@ trait Scanners extends ScannersCommon {
             setStrVal()
             token = STRINGLIT
           } else
-            getStringPart(multiLine)
+            getStringPart(multiLine, seenEscapedQuote)
         } else {
           nextChar()
           setStrVal()
           token = STRINGLIT
         }
-      } else if (ch == '$') {
+      } else if (ch == '\\' && !multiLine) {
+        putChar(ch)
         nextRawChar()
-        if (ch == '$') {
+        val q = ch == '"'
+        if (q || ch == '\\') {
           putChar(ch)
           nextRawChar()
-          getStringPart(multiLine)
+        }
+        getStringPart(multiLine, seenEscapedQuote || q)
+      } else if (ch == '$') {
+        nextRawChar()
+        if (ch == '$' || ch == '"') {
+          putChar(ch)
+          nextRawChar()
+          getStringPart(multiLine, seenEscapedQuote)
         } else if (ch == '{') {
           finishStringPart()
           nextRawChar()
@@ -938,20 +953,22 @@ trait Scanners extends ScannersCommon {
             next.token = kwArray(idx)
           }
         } else {
-          syntaxError(s"invalid string interpolation $$$ch, expected: $$$$, $$identifier or $${expression}")
+          val expectations = "$$, $\", $identifier or ${expression}"
+          syntaxError(s"invalid string interpolation $$$ch, expected: $expectations")
         }
       } else {
         val isUnclosedLiteral = (ch == SU || (!multiLine && (ch == CR || ch == LF)))
         if (isUnclosedLiteral) {
           if (multiLine)
             incompleteInputError("unclosed multi-line string literal")
-          else
-            unclosedStringLit()
+          else {
+            unclosedStringLit(seenEscapedQuote)
+          }
         }
         else {
           putChar(ch)
           nextRawChar()
-          getStringPart(multiLine)
+          getStringPart(multiLine, seenEscapedQuote)
         }
       }
     }

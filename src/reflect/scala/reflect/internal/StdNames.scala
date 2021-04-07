@@ -391,7 +391,7 @@ trait StdNames {
     val OUTER: NameType                    = nameType("$outer")
     val OUTER_LOCAL: NameType              = OUTER.localName
     val OUTER_ARG: NameType                = nameType("arg" + OUTER)
-    val OUTER_SYNTH: NameType              = nameType("<outer>") // emitted by virtual pattern matcher, replaced by outer accessor in explicitouter
+    val OUTER_SYNTH: NameType              = nameType("<outer>") // emitted by pattern matcher, replaced by outer accessor in explicitouter
     val ROOTPKG: NameType                  = nameType("_root_")
     val SELECTOR_DUMMY: NameType           = nameType("<unapply-selector>")
     val SELF: NameType                     = nameType(s"$$this")
@@ -456,9 +456,8 @@ trait StdNames {
      *  or $ followed by an operator that gets encoded, go directly to compiler
      *  crash. Do not pass go and don't even think about collecting any $$
      */
-    def unexpandedName(name: Name): Name = {
-      if (!name.containsChar('$')) name // lastIndexOf calls Name.toString, add a fast path to avoid that.
-      else name lastIndexOf "$$" match {
+    def unexpandedName(name: Name): Name =
+      name.lastIndexOf("$$") match {
         case 0 | -1 => name
         case idx0   =>
           // Sketchville - We've found $$ but if it's part of $$$ or $$$$
@@ -467,9 +466,8 @@ trait StdNames {
           var idx = idx0
           while (idx > 0 && name.charAt(idx - 1) == '$')
             idx -= 1
-          name drop idx + 2
+          name.drop(idx + 2)
       }
-    }
 
     @deprecated("use unexpandedName", "2.11.0") def originalName(name: Name): Name            = unexpandedName(name)
     @deprecated("use Name#dropModule", "2.11.0") def stripModuleSuffix(name: Name): Name      = name.dropModule
@@ -651,6 +649,15 @@ trait StdNames {
 
     val copyArrayToImmutableIndexedSeq: NameType = nameType("copyArrayToImmutableIndexedSeq")
 
+    val double2Double: NameType   = nameType("double2Double")
+    val float2Float: NameType     = nameType("float2Float")
+    val byte2Byte: NameType       = nameType("byte2Byte")
+    val short2Short: NameType     = nameType("short2Short")
+    val char2Character: NameType  = nameType("char2Character")
+    val int2Integer: NameType     = nameType("int2Integer")
+    val long2Long: NameType       = nameType("long2Long")
+    val boolean2Boolean: NameType = nameType("boolean2Boolean")
+
     // Compiler utilized names
 
     val AnnotatedType: NameType        = nameType("AnnotatedType")
@@ -722,6 +729,7 @@ trait StdNames {
     val async : NameType               = nameType("async")
     val await : NameType               = nameType("await")
     val box: NameType                  = nameType("box")
+    val byteValue: NameType            = nameType("byteValue")
     val bytes: NameType                = nameType("bytes")
     val c: NameType                    = nameType("c")
     val canEqual_ : NameType           = nameType("canEqual")
@@ -736,6 +744,7 @@ trait StdNames {
     val delayedInitArg: NameType       = nameType("delayedInit$body")
     val dollarScope: NameType          = nameType("$scope")
     val doubleHash: NameType           = nameType("doubleHash")
+    val doubleValue: NameType          = nameType("doubleValue")
     val drop: NameType                 = nameType("drop")
     val elem: NameType                 = nameType("elem")
     val noSelfType: NameType           = nameType("noSelfType")
@@ -756,6 +765,7 @@ trait StdNames {
     val find_ : NameType               = nameType("find")
     val flatMap: NameType              = nameType("flatMap")
     val floatHash: NameType            = nameType("floatHash")
+    val floatValue: NameType           = nameType("floatValue")
     val foreach: NameType              = nameType("foreach")
     val freshTermName: NameType        = nameType("freshTermName")
     val freshTypeName: NameType        = nameType("freshTypeName")
@@ -770,12 +780,15 @@ trait StdNames {
     val initialized : NameType         = nameType("initialized")
     val internal: NameType             = nameType("internal")
     val inlinedEquals: NameType        = nameType("inlinedEquals")
+    val intValue: NameType             = nameType("intValue")
     val ioobe : NameType               = nameType("ioobe")
     val isArray: NameType              = nameType("isArray")
     val isDefinedAt: NameType          = nameType("isDefinedAt")
     val isEmpty: NameType              = nameType("isEmpty")
+    val isInfinite: NameType           = nameType("isInfinite")
     val isInstanceOf_ : NameType       = nameType("isInstanceOf")
     val isInstanceOf_Ob : NameType     = nameType(s"$$isInstanceOf") // looks like missing interpolator due to Any member in scope
+    val isNaN: NameType                = nameType("isNaN")
     val java: NameType                 = nameType("java")
     val key: NameType                  = nameType("key")
     val lang: NameType                 = nameType("lang")
@@ -783,6 +796,7 @@ trait StdNames {
     val lengthCompare: NameType        = nameType("lengthCompare")
     val locally: NameType              = nameType("locally")
     val longHash: NameType             = nameType("longHash")
+    val longValue: NameType            = nameType("longValue")
     val macroContext : NameType        = nameType("c")
     val main: NameType                 = nameType("main")
     val manifestToTypeTag: NameType    = nameType("manifestToTypeTag")
@@ -837,6 +851,7 @@ trait StdNames {
     val setInfo: NameType              = nameType("setInfo")
     val setSymbol: NameType            = nameType("setSymbol")
     val setType: NameType              = nameType("setType")
+    val shortValue: NameType           = nameType("shortValue")
     val splice: NameType               = nameType("splice")
     val staticClass : NameType         = nameType("staticClass")
     val staticModule : NameType        = nameType("staticModule")

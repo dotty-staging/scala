@@ -14,7 +14,7 @@ package scala
 package tools.nsc
 package typechecker
 
-import scala.annotation.{nowarn, tailrec}
+import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.reflect.internal.{Chars, TypesStats}
 import scala.reflect.internal.util.{FreshNameCreator, ListOfNil, Statistics, StatisticsStatics}
@@ -369,10 +369,14 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
     private def errorNotClass(tpt: Tree, found: Type)  = { ClassTypeRequiredError(tpt, found); false }
     private def errorNotStable(tpt: Tree, found: Type) = { TypeNotAStablePrefixError(tpt, found); false }
 
-    /** Check that `tpt` refers to a non-refinement class type */
-    def checkClassType(tpt: Tree): Boolean = {
+    /** Check that `tpt` refers to a non-refinement class or module type */
+    def checkClassOrModuleType(tpt: Tree): Boolean = {
       val tpe = unwrapToClass(tpt.tpe)
-      isNonRefinementClassType(tpe) || errorNotClass(tpt, tpe)
+      def isModule = tpe match {
+        case SingleType(_, sym) => sym.isModule
+        case _ => false
+      }
+      isNonRefinementClassType(tpe) || isModule || errorNotClass(tpt, tpe)
     }
 
     /** Check that `tpt` refers to a class type with a stable prefix. */
@@ -823,7 +827,7 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
                 else tpr.typed(withImplicitArgs, mode, pt)
               } orElse { originalErrors =>
                 // Re-try typing (applying to implicit args) without expected type. Add in 53d98e7d42 to
-                // for better error message (scala/bug#2180, http://www.scala-lang.org/old/node/3453.html)
+                // for better error message (scala/bug#2180, https://www.scala-lang.org/old/node/3453.html)
                 val resetTree = resetAttrs(original)
                 resetTree match {
                   case treeInfo.Applied(fun, _, _) =>
@@ -1197,7 +1201,7 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
             case _                                               => applyPossible
           }
         }
-        if (tree.isType)
+        if (tree.isType) // (6)
           adaptType()
         else if (mode.typingExprNotFun &&
                  treeInfo.isMacroApplication(tree) &&
@@ -1205,17 +1209,18 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
           macroExpand(this, tree, mode, pt)
         else if (mode.typingConstructorPattern)
           typedConstructorPattern(tree, pt)
-        else if (shouldInsertApply(tree))
+        else if (shouldInsertApply(tree)) // (8)
           insertApply()
-        else if (hasUndetsInMonoMode) { // (9)
+        else if (hasUndetsInMonoMode) // (9)
           // This used to have
           //     assert(!context.inTypeConstructorAllowed, context)
           // but that's not guaranteed to be true in the face of erroneous code; errors in typedApply might mean we
           // never get around to inferring them, and they leak out and wind up here.
           instantiatePossiblyExpectingUnit(tree, mode, pt)
-        }
-        // TODO: we really shouldn't use T* as a first class types (e.g. for repeated case fields), but we can't allow T* to conform to other types (see isCompatible) because that breaks overload resolution
-        else if (isScalaRepeatedParamType(tree.tpe) && !isScalaRepeatedParamType(pt)) adapt(tree.setType(repeatedToSeq(tree.tpe)), mode, pt, original = EmptyTree)
+        else if (isScalaRepeatedParamType(tree.tpe) && !isScalaRepeatedParamType(pt))
+          // TODO: we really shouldn't use T* as a first class types (e.g. for repeated case fields),
+          //  but we can't allow T* to conform to other types (see isCompatible) because that breaks overload resolution
+          adapt(tree.setType(repeatedToSeq(tree.tpe)), mode, pt, original = EmptyTree)
         else if (tree.tpe <:< pt)
           tree
         else if (mode.inPatternMode && { inferModulePattern(tree, pt); isPopulated(tree.tpe, approximateAbstracts(pt)) })
@@ -1240,8 +1245,8 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
           inferExprAlternative(tree, pt)
           adaptAfterOverloadResolution(tree, mode, pt, original)
         case NullaryMethodType(restpe) => // (2)
-          val resTpDeconst =
-            if (isPastTyper || (tree.symbol.isAccessor && tree.symbol.hasFlag(STABLE) && treeInfo.isExprSafeToInline(tree))) restpe
+          val resTpDeconst = // keep constant types when they are safe to fold. erasure eliminates constant types modulo some exceptions, so keep those.
+            if (isBeforeErasure && tree.symbol.isAccessor && tree.symbol.hasFlag(STABLE) && treeInfo.isExprSafeToInline(tree)) restpe
             else restpe.deconst
           adapt(tree setType resTpDeconst, mode, pt, original)
         case TypeRef(_, ByNameParamClass, arg :: Nil) if mode.inExprMode => // (2)
@@ -3577,7 +3582,7 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
 
         case _ if currentRun.runDefinitions.isPolymorphicSignature(fun.symbol) =>
           // Mimic's Java's treatment of polymorphic signatures as described in
-          // https://docs.oracle.com/javase/specs/jls/se8/html/jls-15.html#jls-15.12.3
+          // https://docs.oracle.com/javase/specs/jls/se11/html/jls-15.html#jls-15.12.3
           //
           // One can think of these methods as being infinitely overloaded. We create
           // a fictitious new cloned method symbol for each call site that takes on a signature
@@ -3585,7 +3590,10 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
           val args1 = typedArgs(args, forArgMode(fun, mode))
           val clone = fun.symbol.cloneSymbol.withoutAnnotations
           val cloneParams = args1.map(arg => clone.newValueParameter(freshTermName()).setInfo(arg.tpe.deconst))
-          val resultType = if (isFullyDefined(pt)) pt else ObjectTpe
+          val resultType =
+            if (fun.symbol.tpe.resultType.typeSymbol != ObjectClass) fun.symbol.tpe.resultType
+            else if (isFullyDefined(pt)) pt
+            else ObjectTpe
           clone.modifyInfo(mt => copyMethodType(mt, cloneParams, resultType))
           val fun1 = fun.setSymbol(clone).setType(clone.info)
           doTypedApply(tree, fun1, args1, mode, resultType).setType(resultType)
@@ -3857,8 +3865,7 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
     /**
      * Convert an annotation constructor call into an AnnotationInfo.
      */
-    @nowarn("cat=lint-nonlocal-return")
-    def typedAnnotation(ann: Tree, annotee: Option[Tree], mode: Mode = EXPRmode): AnnotationInfo = context.withinAnnotation {
+    def typedAnnotation(ann: Tree, annotee: Option[Tree], mode: Mode = EXPRmode): AnnotationInfo = {
       var hasError: Boolean = false
       var unmappable: Boolean = false
       val pending = ListBuffer[AbsTypeError]()
@@ -3918,13 +3925,30 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
         ErroneousAnnotation
       }
 
+      // begin typedAnnotation
+      val treeInfo.Applied(fun0, _, argss) = ann
+      if (fun0.isErroneous) return finish(ErroneousAnnotation)
+      val typedFun = context.withinAnnotation(typed(fun0, mode.forFunMode))
+      if (typedFun.isErroneous) return finish(ErroneousAnnotation)
+
+      val Select(New(annTpt), _) = typedFun: @unchecked
+      val annType = annTpt.tpe // for a polymorphic annotation class, this type will have unbound type params (see context.undetparams)
+      val annTypeSym = annType.typeSymbol
+      val isJava = annTypeSym.isJavaDefined
+
+      val isAnnotation = annTypeSym.isJavaAnnotation || annType <:< AnnotationClass.tpe
+      if (!isAnnotation) {
+        reportAnnotationError(DoesNotExtendAnnotation(typedFun, annTypeSym))
+        return finish(ErroneousAnnotation)
+      }
+
       /* Calling constfold right here is necessary because some trees (negated
        * floats and literals in particular) are not yet folded.
        */
       def tryConst(tr: Tree, pt: Type): Option[LiteralAnnotArg] = {
         // The typed tree may be relevantly different than the tree `tr`,
         // e.g. it may have encountered an implicit conversion.
-        val ttree = typed(constfold(tr, context.owner), pt)
+        val ttree = if (isJava) typed(constfold(tr, context.owner), pt) else tr
         val const: Constant = ttree match {
           case l @ Literal(c) if !l.isErroneous => c
           case tree => tree.tpe match {
@@ -3933,9 +3957,14 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
           }
         }
 
+        def isDefaultArg(tree: Tree) = tree match {
+          case treeInfo.Applied(fun, _, _) => fun.symbol.isDefaultGetter
+          case _ => false
+        }
+
         if (const == null) {
           if (unit.isJava) unmappable = true
-          else reportAnnotationError(AnnotationNotAConstantError(ttree))
+          else if (!isDefaultArg(ttree)) reportAnnotationError(AnnotationNotAConstantError(ttree))
           None
         } else if (const.value == null) {
           reportAnnotationError(AnnotationArgNullError(tr)); None
@@ -3955,7 +3984,7 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
         case Apply(Select(New(_), nme.CONSTRUCTOR), _) if pt.typeSymbol == ArrayClass =>
           reportAnnotationError(ArrayConstantsError(tree)); None
 
-        case ann @ Apply(Select(New(tpt), nme.CONSTRUCTOR), _) =>
+        case ann @ Apply(Select(New(tpt), nme.CONSTRUCTOR), _) if isJava =>
           val annInfo = typedAnnotation(ann, None, mode)
           val annType = annInfo.atp
 
@@ -3969,10 +3998,12 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
 
         // use of Array.apply[T: ClassTag](xs: T*): Array[T]
         // and    Array.apply(x: Int, xs: Int*): Array[Int]       (and similar)
-        case Apply(fun, args) =>
-          val typedFun = typed(fun, mode.forFunMode)
+        case treeInfo.Applied(fun, targs, args :: _) =>
+          val typedFun = if (isJava) typed(fun, mode.forFunMode) else fun
           if (typedFun.symbol.owner == ArrayModule.moduleClass && typedFun.symbol.name == nme.apply)
             pt match {
+              case _ if !isJava =>
+                trees2ConstArg(args, targs.headOption.map(_.tpe).getOrElse(WildcardType))
               case TypeRef(_, ArrayClass, targ :: _) =>
                 trees2ConstArg(args, targ)
               case _ =>
@@ -4001,38 +4032,16 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
           .map(args => ArrayAnnotArg(args.toArray))
       }
 
-      // begin typedAnnotation
-      val treeInfo.Applied(fun0, _, argss) = ann
-      if (fun0.isErroneous) return finish(ErroneousAnnotation)
-      val typedFun = typed(fun0, mode.forFunMode)
-      if (typedFun.isErroneous) return finish(ErroneousAnnotation)
-
-      val Select(New(annTpt), _) = typedFun: @unchecked
-      val annType = annTpt.tpe // for a polymorphic annotation class, this type will have unbound type params (see context.undetparams)
-      val annTypeSym = annType.typeSymbol
-      val isJava = annTypeSym.isJavaDefined
-
-      val isAnnotation = annTypeSym.isJavaAnnotation || annType <:< AnnotationClass.tpe
-      if (!isAnnotation) {
-        reportAnnotationError(DoesNotExtendAnnotation(typedFun, annTypeSym))
-        return finish(ErroneousAnnotation)
-      }
-
       @inline def constantly = {
         // Arguments of Java annotations and ConstantAnnotations are checked to be constants and
         // stored in the `assocs` field of the resulting AnnotationInfo
         if (argss.lengthIs > 1) {
           reportAnnotationError(MultipleArgumentListForAnnotationError(ann))
         } else {
-          // TODO: annType may have undetermined type params for Scala ConstantAnnotations, see scala/bug#11724.
-          // Can we infer them, e.g., `typed(argss.foldLeft(fun0)(Apply(_, _)))`?
-          val annScopeJava =
-            if (isJava) annType.decls.filter(sym => sym.isMethod && !sym.isConstructor && sym.isJavaDefined)
-            else EmptyScope // annScopeJava is only used if isJava
+          val annScopeJava = annType.decls.filter(sym => sym.isMethod && !sym.isConstructor && sym.isJavaDefined)
 
           val names = mutable.Set[Symbol]()
-          names ++= (if (isJava) annScopeJava.iterator
-                     else typedFun.tpe.params.iterator)
+          names ++= annScopeJava.iterator
 
           def hasValue = names exists (_.name == nme.value)
           val namedArgs = argss match {
@@ -4043,8 +4052,7 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
 
           val nvPairs = namedArgs map {
             case arg @ NamedArg(Ident(name), rhs) =>
-              val sym = if (isJava) annScopeJava.lookup(name)
-                        else findSymbol(typedFun.tpe.params)(_.name == name)
+              val sym = annScopeJava.lookup(name)
               if (sym == NoSymbol) {
                 reportAnnotationError(UnknownAnnotationNameError(arg, name))
                 (nme.ERROR, None)
@@ -4053,7 +4061,7 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
                 (nme.ERROR, None)
               } else {
                 names -= sym
-                if (isJava) sym.cookJavaRawInfo() // #3429
+                sym.cookJavaRawInfo() // #3429
                 val annArg = tree2ConstArg(rhs, sym.tpe.resultType)
                 (sym.name, annArg)
               }
@@ -4086,10 +4094,11 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
             AnnotationInfo(tpt.tpe, args, Nil).setOriginal(typedAnn).setPos(t.pos)
 
           case Block(_, expr) =>
-            context.warning(t.pos, "Usage of named or default arguments transformed this annotation\n"+
-                              "constructor call into a block. The corresponding AnnotationInfo\n"+
-                              "will contain references to local values and default getters instead\n"+
-                              "of the actual argument trees", WarningCategory.Other)
+            if (!annTypeSym.isNonBottomSubClass(ConstantAnnotationClass))
+              context.warning(t.pos, "Usage of named or default arguments transformed this annotation\n"+
+                                "constructor call into a block. The corresponding AnnotationInfo\n"+
+                                "will contain references to local values and default getters instead\n"+
+                                "of the actual argument trees", WarningCategory.Other)
             annInfo(expr)
 
           case Apply(fun, args) =>
@@ -4124,12 +4133,38 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
         }
       }
 
-      finish(
-        if (isJava || annTypeSym.isNonBottomSubClass(ConstantAnnotationClass))
+      finish {
+        if (isJava)
           constantly
-        else
-          statically
-      )
+        else {
+          val info = statically
+          if (!info.isErroneous && annTypeSym.isNonBottomSubClass(ConstantAnnotationClass)) {
+            var namedArgs: Map[Name, Tree] = Map.empty
+            val treeInfo.Applied(constr, _, _) = info.original match {
+              case Block(stats, call) =>
+                // when named / default args are used
+                namedArgs = Map.from(stats collect {
+                  case ValDef(_, name, _, rhs) => (name, rhs)
+                })
+                call
+              case call => call
+            }
+            val params = constr.symbol.paramss.headOption.getOrElse(Nil)
+            val assocs = info.args.zip(params) map {
+              case (arg, param) =>
+                val origArg = arg match {
+                  case Ident(n) => namedArgs.getOrElse(n, arg)
+                  case _ => arg
+                }
+                (param.name, tree2ConstArg(origArg, param.tpe.resultType))
+            }
+            if (hasError) ErroneousAnnotation
+            else if (unmappable) UnmappableAnnotation
+            else AnnotationInfo(info.atp, Nil, assocs.collect { case (n, Some(arg)) => (n, arg) }).setOriginal(info.original).setPos(info.pos)
+          } else
+            info
+        }
+      }
     }
 
     def typedMacroAnnotation(cdef: ClassDef) = {
@@ -4273,7 +4308,7 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
     }
 
     def typedClassOf(tree: Tree, tpt: Tree, noGen: Boolean = false) =
-      if (!checkClassType(tpt) && noGen) tpt
+      if (!checkClassOrModuleType(tpt) && noGen) tpt
       else atPos(tree.pos)(gen.mkClassOf(tpt.tpe))
 
     protected def typedExistentialTypeTree(tree: ExistentialTypeTree, mode: Mode): Tree = {
@@ -4686,7 +4721,7 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
 
         // in principle we should pack the types of each branch before lubbing, but lub doesn't really work for existentials anyway
         // in the special (though common) case where the types are equal, it pays to pack before comparing
-        // especially virtpatmat needs more aggressive unification of skolemized types
+        // especially virtpatmat needed more aggressive unification of skolemized types
         // this breaks src/library/scala/collection/immutable/TrieIterator.scala (which as of 2.13 doesn't actually exist anymore)
         // annotated types need to be lubbed regardless (at least, continuations break if you bypass them like this)
         def samePackedTypes = (
@@ -4711,8 +4746,7 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
         }
       }
 
-      // When there's a suitable __match in scope, virtualize the pattern match
-      // otherwise, type the Match and leave it until phase `patmat` (immediately after typer)
+      // Type the Match and leave it until phase `patmat`
       // empty-selector matches are transformed into synthetic PartialFunction implementations when the expected type demands it
       def typedVirtualizedMatch(tree: Match): Tree = {
         val selector = tree.selector
@@ -5507,11 +5541,9 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
       }
 
       def typedAppliedTypeTree(tree: AppliedTypeTree) = {
-        val tpt        = tree.tpt
-        val args       = tree.args
-        val tpt1       = typed1(tpt, mode | FUNmode | TAPPmode, WildcardType)
-        def isPoly     = tpt1.tpe.isInstanceOf[PolyType]
-        def isComplete = tpt1.symbol.rawInfo.isComplete
+        val tpt = tree.tpt
+        val args = tree.args
+        val tpt1 = typed1(tpt, mode | FUNmode | TAPPmode, WildcardType)
 
         if (tpt1.isErrorTyped) {
           tpt1
@@ -5519,6 +5551,7 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
           AppliedTypeNoParametersError(tree, tpt1.tpe)
         } else {
           val tparams = tpt1.symbol.typeParams
+          val isComplete = tpt1.symbol.rawInfo.isComplete
 
           if (sameLength(tparams, args)) {
             // @M: kind-arity checking is done here and in adapt, full kind-checking is in checkKindBounds (in Infer)
@@ -5566,6 +5599,7 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
             }
             val original = treeCopy.AppliedTypeTree(tree, tpt1, args1)
             val result = TypeTree(appliedType(tpt1.tpe, argtypes)) setOriginal original
+            val isPoly = tpt1.tpe.isInstanceOf[PolyType]
             if (isPoly) // did the type application (performed by appliedType) involve an unchecked beta-reduction?
               TypeTreeWithDeferredRefCheck() { () =>
                 // wrap the tree and include the bounds check -- refchecks will perform this check (that the beta reduction was indeed allowed) and unwrap
@@ -5620,33 +5654,47 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
 
         treeCopy.Star(tree, typed(tree.elem, mode, pt)) setType makeFullyDefined(pt)
       }
-      def issueTryWarnings(tree: Try): Try = {
-        def checkForCatchAll(cdef: CaseDef): Unit = {
-          def unbound(t: Tree) = t.symbol == null || t.symbol == NoSymbol
-          def warn(name: Name) = {
-            val msg = s"This catches all Throwables. If this is really intended, use `case ${name.decoded} : Throwable` to clear this warning."
-            context.warning(cdef.pat.pos, msg, WarningCategory.Other)
-          }
-          if (cdef.guard.isEmpty) cdef.pat match {
-            case Bind(name, i @ Ident(_)) if unbound(i) => warn(name)
-            case i @ Ident(name) if unbound(i)          => warn(name)
-            case _                                      =>
-          }
-        }
-        if (!isPastTyper) tree match {
-          case Try(_, Nil, fin) =>
-            if (fin eq EmptyTree)
-              context.warning(tree.pos, "A try without a catch or finally is equivalent to putting its body in a block; no exceptions are handled.", WarningCategory.Other)
-          case Try(_, catches, _) =>
-            catches foreach checkForCatchAll
-        }
-        tree
-      }
 
       def typedTry(tree: Try) = {
+        def warn(pos: Position, name: Name) = {
+          val msg = s"This catches all Throwables. If this is really intended, use `case ${name.decoded} : Throwable` to clear this warning."
+          context.warning(pos, msg, WarningCategory.Other)
+        }
+        def issueTryWarnings(tree: Try): Try = {
+          def checkForCatchAll(cdef: CaseDef): Unit = {
+            def unbound(t: Tree) = t.symbol == null || t.symbol == NoSymbol
+            if (cdef.guard.isEmpty) cdef.pat match {
+              case Bind(name, i @ Ident(_)) if unbound(i) => warn(cdef.pat.pos, name)
+              case i @ Ident(name) if unbound(i)          => warn(cdef.pat.pos, name)
+              case _                                      =>
+            }
+          }
+          if (!isPastTyper) tree match {
+            case Try(_, Nil, fin) =>
+              if (fin eq EmptyTree)
+                context.warning(tree.pos, "A try without a catch or finally is equivalent to putting its body in a block; no exceptions are handled.", WarningCategory.Other)
+            case Try(_, catches, _) =>
+              catches foreach checkForCatchAll
+          }
+          tree
+        }
+
+
         val Try(block, catches, fin) = tree
         val block1   = typed(block, pt)
-        val catches1 = typedCases(catches, ThrowableTpe, pt)
+        val cases    = catches match {
+          case CaseDef(EmptyTree, EmptyTree, catchExpr) :: Nil =>
+            val e = typed(catchExpr, functionType(List(ThrowableTpe), pt))
+            val catcher =
+              if (isPartialFunctionType(e.tpe)) treeBuilder.makeCatchFromExpr(e)
+              else {
+                warn(e.pos, nme.WILDCARD)
+                treeBuilder.makeCatchFromFunc(e)
+              }
+            catcher :: Nil
+          case _ => catches
+        }
+        val catches1 = typedCases(cases, ThrowableTpe, pt)
         val fin1     = if (fin.isEmpty) fin else typed(fin, UnitTpe)
 
         def finish(ownType: Type) = treeCopy.Try(tree, block1, catches1, fin1) setType ownType
@@ -5827,11 +5875,10 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
 
         if (refTyped.isErrorTyped) setError(tree)
         else {
-          // .resultType unwraps NullaryMethodType (accessor of a path)
+            // .resultType unwraps NullaryMethodType (accessor of a path)
           // .deconst unwraps the ConstantType to a LiteralType (for literal-based singleton types)
-          tree setType refTyped.tpe.resultType.deconst
           if (!treeInfo.admitsTypeSelection(refTyped)) UnstableTreeError(tree)
-          else tree
+          else treeCopy.SingletonTypeTree(tree, refTyped).setType(refTyped.tpe.resultType.deconst)
         }
       }
 

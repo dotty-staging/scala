@@ -20,7 +20,7 @@ import scala.util.hashing.MurmurHash3
 
 /** This class implements mutable maps using a hashtable.
   *
-  *  @see [[http://docs.scala-lang.org/overviews/collections/concrete-mutable-collection-classes.html#hash-tables "Scala's Collection Library overview"]]
+  *  @see [[https://docs.scala-lang.org/overviews/collections/concrete-mutable-collection-classes.html#hash-tables "Scala's Collection Library overview"]]
   *  section on `Hash Tables` for more information.
   *
   *  @tparam K    the type of the keys contained in this hash map.
@@ -491,6 +491,16 @@ class HashMap[K, V](initialCapacity: Int, loadFactor: Double)
     }
   }
 
+  override def foreachEntry[U](f: (K, V) => U): Unit = {
+    val len = table.length
+    var i = 0
+    while(i < len) {
+      val n = table(i)
+      if(n ne null) n.foreachEntry(f)
+      i += 1
+    }
+  }
+
   protected[this] def writeReplace(): AnyRef = new DefaultSerializationProxy(new mutable.HashMap.DeserializationFactory[K, V](table.length, loadFactor), this)
 
   override def filterInPlace(p: (K, V) => Boolean): this.type = {
@@ -616,6 +626,12 @@ object HashMap extends MapFactory[HashMap] {
     def foreach[U](f: ((K, V)) => U): Unit = {
       f((_key, _value))
       if(_next ne null) _next.foreach(f)
+    }
+
+    @tailrec
+    def foreachEntry[U](f: (K, V) => U): Unit = {
+      f(_key, _value)
+      if(_next ne null) _next.foreachEntry(f)
     }
 
     override def toString = s"Node($key, $value, $hash) -> $next"

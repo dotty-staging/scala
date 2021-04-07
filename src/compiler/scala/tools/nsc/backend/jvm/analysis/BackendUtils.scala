@@ -76,6 +76,11 @@ abstract class BackendUtils extends PerRunInit {
     case "10" => asm.Opcodes.V10
     case "11" => asm.Opcodes.V11
     case "12" => asm.Opcodes.V12
+    case "13" => asm.Opcodes.V13
+    case "14" => asm.Opcodes.V14
+    case "15" => asm.Opcodes.V15
+    case "16" => asm.Opcodes.V16
+    case "17" => asm.Opcodes.V17
     // to be continued...
   })
 
@@ -709,7 +714,7 @@ object BackendUtils {
        *
        * However, the JVM spec does not require subroutines to `RET x` to their caller, they could return back to an
        * outer subroutine caller (nested subroutines), or `RETURN`, or use a static jump. Static analysis of subroutines
-       * is therefore complex (http://www21.in.tum.de/~kleing/papers/KleinW-TPHOLS03.pdf).
+       * is therefore complex (https://www21.in.tum.de/~kleing/papers/KleinW-TPHOLS03.pdf).
        *
        * The asm.Analyzer however makes the assumption that subroutines only occur in the shape emitted by early
        * javac, i.e., `RET` always returns to the next enclosing caller. So we do that as well.

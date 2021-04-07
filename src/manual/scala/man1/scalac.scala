@@ -13,7 +13,7 @@ object scalac extends Command {
   val name = Section("NAME",
 
     MBold(command) & " " & NDash & " Compiler for the " &
-    Link("Scala 2", "http://scala-lang.org/") & " language")
+    Link("Scala 2", "https://scala-lang.org/") & " language")
 
   val synopsis = Section("SYNOPSIS",
 
@@ -94,7 +94,7 @@ object scalac extends Command {
             "Specify character encoding used by source files.",
             "The default value is platform-specific (Linux: " & Mono("\"UTF8\"") &
             ", Windows: " & Mono("\"Cp1252\"") & "). Executing the following " &
-            "code in the Scala interpreter will return the default value " &
+            "code in the Scala REPL will return the default value " &
             "on your system:",
             MBold("    scala> ") &
             Mono("new java.io.InputStreamReader(System.in).getEncoding"))),
@@ -263,9 +263,6 @@ object scalac extends Command {
           CmdOptionBound("Vprint:", Argument("phases")),
           "Print out program after " & Argument("phases") & " (see below)."),
         Definition(
-          CmdOptionBound("Vprint-icode", "[:" & Argument("phases") & "]"),
-          "Log internal icode to *.icode files after" & Argument("phases") & " (default: icode)."),
-        Definition(
           CmdOption("Vprint-pos"),
           "Print tree positions, as offsets."),
         Definition(
@@ -388,9 +385,6 @@ object scalac extends Command {
           MItalic("delambdafy"),
           "remove lambdas"),
         Definition(
-          MItalic("icode"),
-          "generate portable intermediate code"),
-        Definition(
           MItalic("inliner"),
           "optimization: do inlining"),
         Definition(
@@ -434,9 +428,9 @@ object scalac extends Command {
           "Specify the options to be passed to the " & MBold("java") &
           " command defined by " & MBold("JAVACMD") & ".",
 
-          "With Java 1.5 (or newer) one may for example configure the " &
-          "memory usage of the JVM as follows: " &
-          Mono("JAVA_OPTS=\"-Xmx512M -Xms16M -Xss16M\"")
+          "One might for example configure the " &
+          "memory usage of the JVM with: " &
+          Mono("JAVA_OPTS=\"-Xmx2G -Xss16M\"")
         ))))
 
   val examples = Section("EXAMPLES",

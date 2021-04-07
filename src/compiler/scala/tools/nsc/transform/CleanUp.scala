@@ -596,18 +596,47 @@ abstract class CleanUp extends Statics with Transform with ast.TreeDSL {
       // with just `ArrayValue(...).$asInstanceOf[...]`
       //
       // See scala/bug#6611; we must *only* do this for literal vararg arrays.
-      case Apply(appMeth @ Select(appMethQual, _), Apply(wrapRefArrayMeth, (arg @ StripCast(ArrayValue(_, _))) :: Nil) :: _ :: Nil)
-      if wrapRefArrayMeth.symbol == currentRun.runDefinitions.wrapVarargsRefArrayMethod && appMeth.symbol == ArrayModule_genericApply && treeInfo.isQualifierSafeToElide(appMethQual) =>
-        arg.transform(this)
+      case Apply(appMeth @ Select(appMethQual, _), Apply(wrapRefArrayMeth, (arg @ StripCast(ArrayValue(elemtpt, elems))) :: Nil) :: classTagEvidence :: Nil)
+      if (wrapRefArrayMeth.symbol == currentRun.runDefinitions.wrapVarargsRefArrayMethod || wrapRefArrayMeth.symbol == currentRun.runDefinitions.genericWrapVarargsRefArrayMethod) && appMeth.symbol == ArrayModule_genericApply && treeInfo.isQualifierSafeToElide(appMethQual) &&
+        !elemtpt.tpe.typeSymbol.isBottomClass && !elemtpt.tpe.typeSymbol.isPrimitiveValueClass /* can happen via specialization.*/  =>
+        classTagEvidence.attachments.get[analyzer.MacroExpansionAttachment] match {
+          case Some(att) if att.expandee.symbol.name == nme.materializeClassTag && tree.isInstanceOf[ApplyToImplicitArgs] =>
+            super.transform(arg)
+          case _                                                      =>
+            localTyper.typedPos(tree.pos) {
+              gen.evalOnce(classTagEvidence, currentOwner, unit) { ev =>
+                val arr = localTyper.typedPos(tree.pos)(gen.mkMethodCall(classTagEvidence, definitions.ClassTagClass.info.decl(nme.newArray), Nil, Literal(Constant(elems.size)) :: Nil))
+                gen.evalOnce(arr, currentOwner, unit) { arr =>
+                  val stats = mutable.ListBuffer[Tree]()
+                  foreachWithIndex(elems) { (elem, i) =>
+                    stats += gen.mkMethodCall(gen.mkAttributedRef(definitions.ScalaRunTimeModule), currentRun.runDefinitions.arrayUpdateMethod,
+                                              Nil, arr() :: Literal(Constant(i)) :: elem :: Nil)
+                  }
+                  super.transform(Block(stats.toList, arr()))
+                }
+              }
+            }
+        }
       case Apply(appMeth @ Select(appMethQual, _), elem0 :: Apply(wrapArrayMeth, (rest @ ArrayValue(elemtpt, _)) :: Nil) :: Nil)
       if wrapArrayMeth.symbol == wrapVarargsArrayMethod(elemtpt.tpe) && appMeth.symbol == ArrayModule_apply(elemtpt.tpe) && treeInfo.isQualifierSafeToElide(appMethQual) =>
         treeCopy.ArrayValue(rest, rest.elemtpt, elem0 :: rest.elems).transform(this)
+        // See scala/bug#12201, should be rewrite as Primitive Array.
+        // Match Array
+      case Apply(appMeth @ Select(appMethQual, _), Apply(wrapRefArrayMeth, StripCast(ArrayValue(elemtpt, elems)) :: Nil) :: _ :: Nil) 
+        if appMeth.symbol == ArrayModule_genericApply && treeInfo.isQualifierSafeToElide(appMethQual) && currentRun.runDefinitions.primitiveWrapArrayMethod.contains(wrapRefArrayMeth.symbol) =>
+        localTyper.typedPos(elemtpt.pos) {
+          ArrayValue(TypeTree(elemtpt.tpe), elems)
+        } transform this
       case Apply(appMeth @ Select(appMethQual, _), elem :: (nil: RefTree) :: Nil)
       if nil.symbol == NilModule && appMeth.symbol == ArrayModule_apply(elem.tpe.widen) && treeInfo.isExprSafeToInline(nil) && treeInfo.isQualifierSafeToElide(appMethQual) =>
         localTyper.typedPos(elem.pos) {
           ArrayValue(TypeTree(elem.tpe), elem :: Nil)
         } transform this
-
+      case Apply(appMeth @ Select(appMethQual, _), elem :: (nil: RefTree) :: Nil)
+        if nil.symbol == NilModule && appMeth.symbol == ArrayModule_apply(elem.tpe.widen) && treeInfo.isExprSafeToInline(nil) && treeInfo.isQualifierSafeToElide(appMethQual) =>
+        localTyper.typedPos(elem.pos) {
+          ArrayValue(TypeTree(elem.tpe), elem :: Nil)
+        } transform this
       // List(a, b, c) ~> new ::(a, new ::(b, new ::(c, Nil)))
       // Seq(a, b, c) ~> new ::(a, new ::(b, new ::(c, Nil)))
       case Apply(appMeth @ Select(appQual, _), List(Apply(wrapArrayMeth, List(StripCast(rest @ ArrayValue(elemtpt, _))))))
@@ -620,6 +649,69 @@ abstract class CleanUp extends Statics with Transform with ast.TreeDSL {
         reducingTransformListApply(rest.elems.length) {
           super.transform(localTyper.typedPos(tree.pos)(consed))
         }
+
+      //methods on Double
+      //new Predef.doubleToDouble(x).isNaN() -> java.lang.Double.isNaN(x)
+      //new Predef.doubleToDouble(x).isInfinite() -> java.lang.Double.isInfinity(x)
+      //methods on Float
+      //new Predef.float2Float(x).isNaN() -> java.lang.Double.isNaN(x)
+      //new Predef.float2Float(x).isInfinite() -> java.lang.Double.isInfinity(x)
+
+      //methods on Number
+      //new Predef.<convert>(x).byteValue() -> x.toByte()
+      //new Predef.<convert>(x).shortValue() -> x.toShort()
+      //new Predef.<convert>(x).intValue() -> x.toInt()
+      //new Predef.<convert>(x).longValue() -> x.toLong()
+      //new Predef.<convert>(x).floatValue() -> x.toFloat()
+      //new Predef.<convert>(x).doubleValue() -> x.toDouble()
+      //
+      // for each of the conversions
+      // double2Double
+      // float2Float
+      // byte2Byte
+      // short2Short
+      // char2Character
+      // int2Integer
+      // long2Long
+      // boolean2Boolean
+      //
+      case Apply(Select(Apply(boxing @ Select(qual, _), params), methodName), Nil)
+        if currentRun.runDefinitions.PreDef_primitives2Primitives.contains(boxing.symbol) &&
+          params.size == 1 &&
+          allPrimitiveMethodsToRewrite.contains(methodName) &&
+          treeInfo.isExprSafeToInline(qual) =>
+        val newTree =
+          if (doubleAndFloatRedirectMethods.contains(methodName)) {
+            val cls =
+              if (boxing.symbol == currentRun.runDefinitions.Predef_double2Double)
+                definitions.BoxedDoubleClass
+              else definitions.BoxedFloatClass
+
+            val targetMethod = cls.companionModule.info.decl(doubleAndFloatRedirectMethods(methodName))
+            gen.mkMethodCall(targetMethod, params)
+          } else {
+            gen.mkMethodCall(Select(params.head, javaNumberConversions(methodName)), Nil)
+          }
+        super.transform(localTyper.typedPos(tree.pos)(newTree))
+
+      //(x:Int).hashCode is transformed to scala.Int.box(x).hashCode()
+      //(x:Int).toString is transformed to scala.Int.box(x).toString()
+      //
+      //rewrite
+      // scala.Int.box(x).hashCode() ->  java.lang.Integer.hashCode(x)
+      // scala.Int.box(x).toString() ->  java.lang.Integer.toString(x)
+      // similarly for all primitive types
+      case Apply(Select(Apply(box @ Select(boxer, _), params), methodName), Nil)
+        if objectMethods.contains(methodName) &&
+          params.size == 1 &&
+          currentRun.runDefinitions.isBox(box.symbol) &&
+          treeInfo.isExprSafeToInline(boxer)
+      =>
+        val target = boxedClass(boxer.symbol.companion)
+        val targetMethod = target.companionModule.info.decl(methodName)
+        val newTree      = gen.mkMethodCall(targetMethod, params)
+        super.transform(localTyper.typedPos(tree.pos)(newTree))
+
       // Seq() ~> Nil (note: List() ~> Nil is rewritten in the Typer)
       case Apply(appMeth @ Select(appQual, _), List(nil))
       if nil.symbol == NilModule && currentRun.runDefinitions.isSeqApply(appMeth) =>
@@ -632,5 +724,24 @@ abstract class CleanUp extends Statics with Transform with ast.TreeDSL {
     }
 
   } // CleanUpTransformer
+
+
+  private val objectMethods = Map[Name, TermName](
+    nme.hashCode_ -> nme.hashCode_,
+    nme.toString_ -> nme.toString_
+    )
+  private val doubleAndFloatRedirectMethods = Map[Name, TermName](
+    nme.isNaN -> nme.isNaN,
+    nme.isInfinite -> nme.isInfinite
+    )
+  private val javaNumberConversions         = Map[Name, TermName](
+    nme.byteValue -> nme.toByte,
+    nme.shortValue -> nme.toShort,
+    nme.intValue -> nme.toInt,
+    nme.longValue -> nme.toLong,
+    nme.floatValue -> nme.toFloat,
+    nme.doubleValue -> nme.toDouble
+    )
+  private val allPrimitiveMethodsToRewrite  = doubleAndFloatRedirectMethods.keySet ++ javaNumberConversions.keySet
 
 }

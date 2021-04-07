@@ -11,7 +11,7 @@ else
 fi
 
 SBT_CMD=${SBT_CMD-sbt}
-SBT_CMD="$SBT_CMD -sbt-version 1.4.4"
+SBT_CMD="$SBT_CMD -sbt-version 1.5.0"
 
 # repo to publish builds
 integrationRepoUrl=${integrationRepoUrl-"https://scala-ci.typesafe.com/artifactory/scala-integration/"}
@@ -184,7 +184,7 @@ triggerScalaDist() {
     -H "Authorization: token $TRAVIS_TOKEN" \
     -H "Content-Type: application/json" \
     -d "$json" \
-    https://api.travis-ci.org/repo/scala%2Fscala-dist/requests)
+    https://api.travis-ci.com/repo/scala%2Fscala-dist/requests)
 
   [[ "$curlStatus" == "202" ]] || {
     echo "failed to start job"

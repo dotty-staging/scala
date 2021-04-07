@@ -201,20 +201,16 @@ trait Names extends api.Names {
     type ThisNameType >: Null <: Name
     protected[this] def thisName: ThisNameType
 
-    // Note that "Name with ThisNameType" should be redundant
-    // because ThisNameType <: Name, but due to scala/bug#6161 the
-    // compile loses track of this fact.
-
     /** Index into name table */
     final def start: Int = index
 
     /** The next name in the same hash bucket. */
-    def next: Name with ThisNameType
+    def next: ThisNameType
 
     /** The length of this name. */
     final def length: Int = len
     final def nonEmpty = !isEmpty
-    // This method is implements NameHasIsEmpty, and overrides CharSequence's isEmpty on JDK 15+
+    // This method implements NameHasIsEmpty, and overrides CharSequence's isEmpty on JDK 15+
     override final def isEmpty = length == 0
 
     def nameKind: String
@@ -228,14 +224,15 @@ trait Names extends api.Names {
       (if (other.isTermName) toTermName else toTypeName).asInstanceOf[N]
 
     /** Return the subname with characters from from to to-1. */
-    def subName(from: Int, to: Int): Name with ThisNameType
+    def subName(from: Int, to: Int): ThisNameType
+
     override def subSequence(from: Int, to: Int): CharSequence = subName(from, to)
 
     /** Return a new name of the same variety. */
-    def newName(str: String): Name with ThisNameType
+    def newName(str: String): ThisNameType
 
     /** Return a new name based on string transformation. */
-    def mapName(f: String => String): Name with ThisNameType = newName(f(toString))
+    def mapName(f: String => String): ThisNameType = newName(f(toString))
 
     /** Copy bytes of this name to buffer cs, starting at position `offset`. */
     final def copyChars(cs: Array[Char], offset: Int) =
@@ -413,11 +410,36 @@ trait Names extends api.Names {
       false
     }
 
+    def lastIndexOf(s: String): Int = if (s.isEmpty) length else {
+      val slength   = s.length()
+      val lastIndex = slength - 1
+      val lastChar  = s.charAt(lastIndex)
+      val contents  = _chrs
+      val base      = start
+      val min       = base + lastIndex
+      var end       = base + length - 1
+
+      while (end >= min) {
+        if (contents(end) == lastChar) {
+          var i  = end - 1
+          val i0 = i - lastIndex
+          var at = lastIndex - 1
+          while (i > i0 && contents(i) == s.charAt(at)) {
+            i -= 1
+            at -= 1
+          }
+          if (i == i0) return i0 + 1 - base
+        }
+        end -= 1
+      }
+      -1
+    }
+
     /** Some thoroughly self-explanatory convenience functions.  They
      *  assume that what they're being asked to do is known to be valid.
      */
-    final def startChar: Char                   = this charAt 0
-    final def endChar: Char                     = this charAt len - 1
+    final def startChar: Char                   = charAt(0)
+    final def endChar: Char                     = charAt(len - 1)
     final def startsWith(char: Char): Boolean   = len > 0 && startChar == char
     final def startsWith(name: String): Boolean = startsWith(name, 0)
     final def endsWith(char: Char): Boolean     = len > 0 && endChar == char
@@ -434,7 +456,6 @@ trait Names extends api.Names {
 
     /** The lastPos methods already return -1 on failure. */
     def lastIndexOf(ch: Char): Int  = lastPos(ch)
-    def lastIndexOf(s: String): Int = toString lastIndexOf s
 
     /** Replace all occurrences of `from` by `to` in
      *  name; result is always a term name.

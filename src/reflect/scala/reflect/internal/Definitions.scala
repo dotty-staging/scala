@@ -1078,10 +1078,7 @@ trait Definitions extends api.StandardDefinitions {
     //         extractor to limit exposure to regressions like the reported problem with existentials.
     //         TODO fix the existential problem in the general case, see test/pending/pos/t8128.scala
     private def typeArgOfBaseTypeOr(tp: Type, baseClass: Symbol)(or: => Type): Type = (tp baseType baseClass).typeArgs match {
-      case x :: Nil =>
-        val x1 = x
-        val x2 = repackExistential(x1)
-        x2
+      case x :: Nil => repackExistential(x)
       case _        => or
     }
 
@@ -1315,7 +1312,7 @@ trait Definitions extends api.StandardDefinitions {
     // Tasty Unpickling Helpers - only access when Scala 3 library is expected to be available
     lazy val ChildAnnotationClass        = getClassIfDefined("scala.annotation.internal.Child")
     lazy val RepeatedAnnotationClass     = getClassIfDefined("scala.annotation.internal.Repeated")
-    lazy val AlphaAnnotationClass        = getClassIfDefined("scala.annotation.alpha")
+    lazy val TargetNameAnnotationClass   = getClassIfDefined("scala.annotation.targetName")
     lazy val StaticMethodAnnotationClass = getClassIfDefined("scala.annotation.static")
     lazy val PolyFunctionClass           = getClassIfDefined("scala.PolyFunction")
 
@@ -1761,6 +1758,20 @@ trait Definitions extends api.StandardDefinitions {
         lazy val SubType_refl  = getMemberMethod(SubTypeModule, nme.refl)
 
       lazy val Predef_classOf      = getMemberMethod(PredefModule, nme.classOf)
+
+      lazy val Predef_double2Double = getMemberMethod(PredefModule, nme.double2Double)
+      lazy val Predef_float2Float = getMemberMethod(PredefModule, nme.float2Float)
+      lazy val Predef_byte2Byte = getMemberMethod(PredefModule, nme.byte2Byte)
+      lazy val Predef_short2Short = getMemberMethod(PredefModule, nme.short2Short)
+      lazy val Predef_char2Character = getMemberMethod(PredefModule, nme.char2Character)
+      lazy val Predef_int2Integer = getMemberMethod(PredefModule, nme.int2Integer)
+      lazy val Predef_long2Long = getMemberMethod(PredefModule, nme.long2Long)
+      lazy val Predef_boolean2Boolean = getMemberMethod(PredefModule, nme.boolean2Boolean)
+
+      lazy val PreDef_primitives2Primitives =
+        Set[Symbol](Predef_double2Double, Predef_float2Float, Predef_byte2Byte, Predef_short2Short,
+          Predef_char2Character, Predef_int2Integer, Predef_long2Long, Predef_boolean2Boolean)
+
       lazy val Predef_implicitly   = getMemberMethod(PredefModule, nme.implicitly)
       lazy val Predef_???          = DefinitionsClass.this.Predef_???
       lazy val Predef_any2stringaddMethod = getMemberMethod(PredefModule, nme.any2stringadd).suchThat(_.isMethod)
@@ -1772,6 +1783,19 @@ trait Definitions extends api.StandardDefinitions {
       lazy val ensureAccessibleMethod = getMemberMethod(ScalaRunTimeModule, nme.ensureAccessible)
       lazy val arrayClassMethod       = getMemberMethod(ScalaRunTimeModule, nme.arrayClass)
       lazy val wrapVarargsRefArrayMethod = getMemberMethod(ScalaRunTimeModule, nme.wrapRefArray)
+      lazy val genericWrapVarargsRefArrayMethod = getMemberMethod(ScalaRunTimeModule, nme.genericWrapArray)
+      lazy val primitiveWrapArrayMethod = Seq[Symbol](
+        getMemberMethod(ScalaRunTimeModule, nme.wrapBooleanArray),
+        getMemberMethod(ScalaRunTimeModule, nme.wrapByteArray),
+        getMemberMethod(ScalaRunTimeModule, nme.wrapCharArray),
+        getMemberMethod(ScalaRunTimeModule, nme.wrapIntArray),
+        getMemberMethod(ScalaRunTimeModule, nme.wrapDoubleArray),
+        getMemberMethod(ScalaRunTimeModule, nme.wrapFloatArray),
+        getMemberMethod(ScalaRunTimeModule, nme.wrapLongArray),
+        getMemberMethod(ScalaRunTimeModule, nme.wrapShortArray),
+        getMemberMethod(ScalaRunTimeModule, nme.wrapUnitArray)
+      )
+
 
       lazy val RuntimeStatics_ioobe = getMemberMethod(RuntimeStaticsModule, nme.ioobe)
 
