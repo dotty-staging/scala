@@ -16,7 +16,7 @@ package scala
  *  object doesn't match any pattern of a pattern matching
  *  expression.
  */
-final class MatchError(@transient obj: Any) extends RuntimeException {
+final class MatchError(@transient private val obj: Any) extends RuntimeException {
   /** There's no reason we need to call toString eagerly,
    *  so defer it until getMessage is called or object is serialized
    */
