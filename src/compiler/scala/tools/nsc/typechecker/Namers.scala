@@ -467,17 +467,6 @@ trait Namers extends MethodSynthesis {
 
       val existingModule = context.scope lookupModule tree.name
       if (existingModule.isModule && !existingModule.hasPackageFlag && inCurrentScope(existingModule) && (currentRun.canRedefine(existingModule) || existingModule.isSynthetic)) {
-        // This code accounts for the way the package objects found in the classpath are opened up
-        // early by the completer of the package itself. If the `packageobjects` phase then finds
-        // the same package object in sources, we have to clean the slate and remove package object
-        // members from the package class.
-        //
-        // TODO scala/bug#4695 Pursue the approach in https://github.com/scala/scala/pull/2789 that avoids
-        //      opening up the package object on the classpath at all if one exists in source.
-        if (existingModule.isPackageObject) {
-          val packageScope = existingModule.enclosingPackageClass.rawInfo.decls
-          packageScope.foreach(mem => if (mem.owner != existingModule.enclosingPackageClass) packageScope unlink mem)
-        }
         updatePosFlags(existingModule, tree.pos, moduleFlags)
         setPrivateWithin(tree, existingModule)
         existingModule.moduleClass andAlso (setPrivateWithin(tree, _))
@@ -632,7 +621,7 @@ trait Namers extends MethodSynthesis {
       def assignParamTypes(copyDef: DefDef, sym: Symbol): Unit = {
         val clazz = sym.owner
         val constructorType = clazz.primaryConstructor.tpe
-        val subst = new SubstSymMap(clazz.typeParams, copyDef.tparams map (_.symbol))
+        val subst = SubstSymMap(clazz.typeParams, copyDef.tparams.map(_.symbol))
         val classParamss = constructorType.paramss
 
         foreach2(copyDef.vparamss, classParamss)((copyParams, classParams) =>
@@ -1487,7 +1476,13 @@ trait Namers extends MethodSynthesis {
       }
 
       val methSig = deskolemizedPolySig(vparamSymssOrEmptyParamsFromOverride, resTp)
-      pluginsTypeSig(methSig, typer, ddef, resTpGiven)
+      val unlink = methOwner.isJava && meth.isSynthetic && meth.isConstructor && methOwner.superClass == JavaRecordClass &&
+        methOwner.info.decl(meth.name).alternatives.exists(c => c != meth && c.tpe.matches(methSig))
+      if (unlink) {
+        methOwner.info.decls.unlink(meth)
+        ErrorType
+      } else
+        pluginsTypeSig(methSig, typer, ddef, resTpGiven)
     }
 
     /**
@@ -1724,7 +1719,7 @@ trait Namers extends MethodSynthesis {
               val valOwner = owner.owner
               // there's no overriding outside of classes, and we didn't use to do this in 2.11, so provide opt-out
 
-              if (!currentRun.isScala212 || !valOwner.isClass) WildcardType
+              if (!valOwner.isClass) WildcardType
               else {
                 // normalize to getter so that we correctly consider a val overriding a def
                 // (a val's name ends in a " ", so can't compare to def)

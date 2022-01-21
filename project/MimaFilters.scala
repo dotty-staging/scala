@@ -13,7 +13,7 @@ object MimaFilters extends AutoPlugin {
   import autoImport._
 
   override val globalSettings = Seq(
-    mimaReferenceVersion := Some("2.13.5"),
+    mimaReferenceVersion := Some("2.13.7"),
   )
 
   val mimaFilters: Seq[ProblemFilter] = Seq[ProblemFilter](
@@ -25,14 +25,11 @@ object MimaFilters extends AutoPlugin {
     // don't publish the artifact built with JDK 11 anyways
     ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.convert.JavaCollectionWrappers#IteratorWrapper.asIterator"),
 
-    // PR: https://github.com/scala/scala/pull/9336; remove after re-STARR
-    ProblemFilters.exclude[MissingTypesProblem]("scala.deprecatedOverriding"),
-    ProblemFilters.exclude[MissingTypesProblem]("scala.deprecatedInheritance"),
-    ProblemFilters.exclude[MissingTypesProblem]("scala.deprecated"),
-    ProblemFilters.exclude[MissingTypesProblem]("scala.annotation.elidable"),
-    ProblemFilters.exclude[MissingTypesProblem]("scala.annotation.implicitAmbiguous"),
-    ProblemFilters.exclude[MissingTypesProblem]("scala.annotation.implicitNotFound"),
-    ProblemFilters.exclude[MissingTypesProblem]("scala.annotation.migration"),
+    // KEEP: when building on a recent JDK, classes implementing `CharSequence` get a mixin forwarder for
+    // the `isEmpty` default method that was added in JDK 15
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.Predef#SeqCharSequence.isEmpty"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.Predef#ArrayCharSequence.isEmpty"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.runtime.ArrayCharSequence.isEmpty"),
   )
 
   override val buildSettings = Seq(

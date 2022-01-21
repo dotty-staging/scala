@@ -19,7 +19,6 @@ import scala.concurrent.duration.Duration
 import scala.io.Codec
 import scala.jdk.CollectionConverters._
 import scala.tools.nsc.util.Exceptional
-import scala.util.chaining._
 
 package object partest {
   type File         = java.io.File
@@ -129,8 +128,6 @@ package object partest {
   def fileSeparator = java.io.File.separator
   def pathSeparator = java.io.File.pathSeparator
 
-  def words(s: String): List[String] = (s.trim split "\\s+").toList
-
   def timed[T](body: => T): (T, Long) = {
     val t1 = System.currentTimeMillis
     val result = body
@@ -142,18 +139,6 @@ package object partest {
   def callable[T](body: => T): Callable[T] = new Callable[T] { override def call() = body }
 
   def basename(name: String): String = Path(name).stripExtension
-
-  /** In order to allow for spaces in flags/options, this
-   *  parses .flags, .javaopts, javacopts etc files as follows:
-   *  If it is exactly one line, it is split (naively) on spaces.
-   *  If it contains more than one line, each line is its own
-   *  token, spaces and all.
-   */
-  def readOptionsFile(file: File): List[String] =
-    file.fileLines match {
-      case x :: Nil   => words(x)
-      case xs         => xs
-    }
 
   def findProgram(name: String): Option[File] = {
     val pathDirs = sys.env("PATH") match {
@@ -194,17 +179,4 @@ package object partest {
   def isDebug                = sys.props.contains("partest.debug") || sys.env.contains("PARTEST_DEBUG")
   def debugSettings          = sys.props.getOrElse("partest.debug.settings", "")
   def log(msg: => Any): Unit = if (isDebug) Console.err.println(msg)
-
-  private val printable = raw"\p{Print}".r
-
-  def hexdump(s: String): Iterator[String] = {
-    var offset = 0
-    def hex(bytes: Array[Byte])   = bytes.map(b => f"$b%02x").mkString(" ")
-    def charFor(byte: Byte): Char = byte.toChar match { case c @ printable() => c ; case _ => '.' }
-    def ascii(bytes: Array[Byte]) = bytes.map(charFor).mkString
-    def format(bytes: Array[Byte]): String =
-      f"$offset%08x  ${hex(bytes.slice(0, 8))}%-24s ${hex(bytes.slice(8, 16))}%-24s |${ascii(bytes)}|"
-        .tap(_ => offset += bytes.length)
-    s.getBytes(codec.charSet).grouped(16).map(format)
-  }
 }

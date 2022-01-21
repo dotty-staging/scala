@@ -33,7 +33,7 @@ abstract class BCodeBodyBuilder extends BCodeSkelBuilder {
   import bTypes._
   import coreBTypes._
   import definitions._
-  import genBCode.postProcessor.backendUtils.addIndyLambdaImplMethod
+  import genBCode.postProcessor.backendUtils.{addIndyLambdaImplMethod, classfileVersion}
   import genBCode.postProcessor.callGraph.{inlineAnnotatedCallsites, noInlineAnnotatedCallsites}
 
   /*
@@ -79,9 +79,23 @@ abstract class BCodeBodyBuilder extends BCodeSkelBuilder {
         case Assign(lhs, rhs) =>
           val s = lhs.symbol
           val Local(tk, _, idx, _) = locals.getOrMakeLocal(s)
-          genLoad(rhs, tk)
-          lineNumber(tree)
-          bc.store(idx, tk)
+
+          rhs match {
+            case Apply(Select(larg: Ident, nme.ADD), Literal(x) :: Nil)
+            if larg.symbol == s && tk.isIntSizedType && x.isShortRange =>
+              lineNumber(tree)
+              bc.iinc(idx, x.intValue)
+
+            case Apply(Select(larg: Ident, nme.SUB), Literal(x) :: Nil)
+            if larg.symbol == s && tk.isIntSizedType && Constant(-x.intValue).isShortRange =>
+              lineNumber(tree)
+              bc.iinc(idx, -x.intValue)
+
+            case _ =>
+              genLoad(rhs, tk)
+              lineNumber(tree)
+              bc.store(idx, tk)
+          }
 
         case _ =>
           genLoad(tree, UNIT)
@@ -303,8 +317,8 @@ abstract class BCodeBodyBuilder extends BCodeSkelBuilder {
           generatedType = genApply(app, expectedType)
 
         case app @ ApplyDynamic(qual, Literal(Constant(bootstrapMethodRef: Symbol)) :: staticAndDynamicArgs) =>
-          val numStaticArgs = bootstrapMethodRef.paramss.head.size - 3 /*JVM provided args*/
-          val (staticArgs, dynamicArgs) = staticAndDynamicArgs.splitAt(numStaticArgs)
+          val numDynamicArgs = qual.symbol.info.params.length
+          val (staticArgs, dynamicArgs) = staticAndDynamicArgs.splitAt(staticAndDynamicArgs.length - numDynamicArgs)
           val bootstrapDescriptor = staticHandleFromSymbol(bootstrapMethodRef)
           val bootstrapArgs = staticArgs.map({case t @ Literal(c: Constant) => bootstrapMethodArg(c, t.pos) case x => throw new MatchError(x)})
           val descriptor = methodBTypeFromMethodType(qual.symbol.info, false)
@@ -953,12 +967,11 @@ abstract class BCodeBodyBuilder extends BCodeSkelBuilder {
             mbt.descriptor
           )
         }
-        module.attachments.get[DottyEnumSingleton] match { // TODO [tasty]: dotty enum singletons are not modules.
-          case Some(enumAttach) =>
-            val enumCompanion = symInfoTK(module.originalOwner).asClassBType
-            visitAccess(enumCompanion, enumAttach.name)
-
-          case _ => visitAccess(mbt, strMODULE_INSTANCE_FIELD)
+        if (module.isScala3Defined && module.hasAttachment[DottyEnumSingleton.type]) { // TODO [tasty]: dotty enum singletons are not modules.
+          val enumCompanion = symInfoTK(module.originalOwner).asClassBType
+          visitAccess(enumCompanion, module.rawname.toString)
+        } else {
+          visitAccess(mbt, strMODULE_INSTANCE_FIELD)
         }
       }
     }
@@ -991,44 +1004,110 @@ abstract class BCodeBodyBuilder extends BCodeSkelBuilder {
       }
     }
 
+    /* Generate string concatenation
+     *
+     * On JDK 8: create and append using `StringBuilder`
+     * On JDK 9+: use `invokedynamic` with `StringConcatFactory`
+     */
     def genStringConcat(tree: Tree): BType = {
       lineNumber(tree)
       liftStringConcat(tree) match {
-        // Optimization for expressions of the form "" + x.  We can avoid the StringBuilder.
+        // Optimization for expressions of the form "" + x
         case List(Literal(Constant("")), arg) =>
           genLoad(arg, ObjectRef)
           genCallMethod(String_valueOf, InvokeStyle.Static, arg.pos)
 
         case concatenations =>
-          val approxBuilderSize = concatenations.map {
-            case Literal(Constant(s: String)) => s.length
-            case Literal(c @ Constant(value)) if c.isNonUnitAnyVal => String.valueOf(c).length
-            case _ =>
-              // could add some guess based on types of primitive args.
-              // or, we could stringify all the args onto the stack, compute the exact size of
-              // the StringBuilder.
-              // or, just let https://openjdk.java.net/jeps/280 (or a re-implementation thereof in our 2.13.x stdlib) do all the hard work at link time
-              0
-          }.sum
-          bc.genStartConcat(tree.pos, approxBuilderSize)
-          def isEmptyString(t: Tree) = t match {
-            case Literal(Constant("")) => true
-            case _ => false
-          }
-          for (elem <- concatenations if !isEmptyString(elem)) {
-            val loadedElem = elem match {
+
+          val concatArguments = concatenations.view
+            .filter {
+              case Literal(Constant("")) => false // empty strings are no-ops in concatenation
+              case _ => true
+            }
+            .map {
               case Apply(boxOp, value :: Nil) if currentRun.runDefinitions.isBox(boxOp.symbol) =>
                 // Eliminate boxing of primitive values. Boxing is introduced by erasure because
                 // there's only a single synthetic `+` method "added" to the string class.
                 value
-
-              case _ => elem
+              case other => other
             }
-            val elemType = tpeTK(loadedElem)
-            genLoad(loadedElem, elemType)
-            bc.genConcat(elemType, loadedElem.pos)
+            .toList
+
+          // `StringConcatFactory` only got added in JDK 9, so use `StringBuilder` for lower
+          if (classfileVersion.get < asm.Opcodes.V9) {
+
+            // Estimate capacity needed for the string builder
+            val approxBuilderSize = concatArguments.view.map {
+              case Literal(Constant(s: String)) => s.length
+              case Literal(c @ Constant(_)) if c.isNonUnitAnyVal => String.valueOf(c).length
+              case _ => 0
+            }.sum
+            bc.genNewStringBuilder(tree.pos, approxBuilderSize)
+
+            for (elem <- concatArguments) {
+              val elemType = tpeTK(elem)
+              genLoad(elem, elemType)
+              bc.genStringBuilderAppend(elemType, elem.pos)
+            }
+            bc.genStringBuilderEnd(tree.pos)
+          } else {
+
+            /* `StringConcatFactory#makeConcatWithConstants` accepts max 200 argument slots. If
+             * the string concatenation is longer (unlikely), we spill into multiple calls
+             */
+            val MaxIndySlots = 200
+            val TagArg = '\u0001'    // indicates a hole (in the recipe string) for an argument
+            val TagConst = '\u0002'  // indicates a hole (in the recipe string) for a constant
+
+            val recipe = new StringBuilder()
+            val argTypes = Seq.newBuilder[asm.Type]
+            val constVals = Seq.newBuilder[String]
+            var totalArgSlots = 0
+            var countConcats = 1     // ie. 1 + how many times we spilled
+
+            for (elem <- concatArguments) {
+              val tpe = tpeTK(elem)
+              val elemSlots = tpe.size
+
+              // Unlikely spill case
+              if (totalArgSlots + elemSlots >= MaxIndySlots) {
+                bc.genIndyStringConcat(recipe.toString, argTypes.result(), constVals.result())
+                countConcats += 1
+                totalArgSlots = 0
+                recipe.setLength(0)
+                argTypes.clear()
+                constVals.clear()
+              }
+
+              elem match {
+                case Literal(Constant(s: String)) =>
+                  if (s.contains(TagArg) || s.contains(TagConst)) {
+                    totalArgSlots += elemSlots
+                    recipe.append(TagConst)
+                    constVals += s
+                  } else {
+                    recipe.append(s)
+                  }
+
+                case other =>
+                  totalArgSlots += elemSlots
+                  recipe.append(TagArg)
+                  val tpe = tpeTK(elem)
+                  argTypes += tpe.toASMType
+                  genLoad(elem, tpe)
+              }
+            }
+            bc.genIndyStringConcat(recipe.toString, argTypes.result(), constVals.result())
+
+            // If we spilled, generate one final concat
+            if (countConcats > 1) {
+              bc.genIndyStringConcat(
+                TagArg.toString * countConcats,
+                Seq.fill(countConcats)(StringRef.toASMType),
+                Seq.empty
+              )
+            }
           }
-          bc.genEndConcat(tree.pos)
       }
       StringRef
     }

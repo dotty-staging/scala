@@ -97,6 +97,11 @@ sealed class Queue[+A] protected(protected val in: List[A], protected val out: L
     else if (in.nonEmpty) new Queue(Nil, in.reverse.tail)
     else throw new NoSuchElementException("tail on empty queue")
 
+  override def last: A =
+    if (in.nonEmpty) in.head
+    else if (out.nonEmpty) out.last
+    else throw new NoSuchElementException("last on empty queue")
+
   /* This is made to avoid inefficient implementation of iterator. */
   override def forall(p: A => Boolean): Boolean =
     in.forall(p) && out.forall(p)
@@ -117,7 +122,7 @@ sealed class Queue[+A] protected(protected val in: List[A], protected val out: L
   override def appendedAll[B >: A](that: scala.collection.IterableOnce[B]): Queue[B] = {
     val newIn = that match {
       case that: Queue[B] => that.in ++ (that.out reverse_::: this.in)
-      case that: List[A] => that reverse_::: this.in
+      case that: List[B] => that reverse_::: this.in
       case _ =>
         var result: List[B] = this.in
         val iter = that.iterator

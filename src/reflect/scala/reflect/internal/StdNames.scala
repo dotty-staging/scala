@@ -236,6 +236,7 @@ trait StdNames {
     final val keywords = kw.result
   } with CommonNames {
     final val javaKeywords = new JavaKeywords()
+    final val javaRestrictedIdentifiers = new JavaRestrictedIdentifiers()
   }
 
   abstract class TypeNames extends Keywords with TypeNamesApi {
@@ -264,6 +265,7 @@ trait StdNames {
     final val Object: NameType          = nameType("Object")
     final val PrefixType: NameType      = nameType("PrefixType")
     final val Product: NameType         = nameType("Product")
+    final val Record: NameType          = nameType("Record")
     final val Serializable: NameType    = nameType("Serializable")
     final val Singleton: NameType       = nameType("Singleton")
     final val Throwable: NameType       = nameType("Throwable")
@@ -321,6 +323,9 @@ trait StdNames {
     final val SyntheticATTR: NameType              = nameType("Synthetic")
 
     final val scala_ : NameType = nameType("scala")
+
+    // Scala 3 special type
+    val AND: NameType = nme.AND.toTypeName
 
     def dropSingletonName(name: Name): TypeName = (name dropRight SINGLETON_SUFFIX.length).toTypeName
     def singletonName(name: Name): TypeName     = (name append SINGLETON_SUFFIX).toTypeName
@@ -419,8 +424,17 @@ trait StdNames {
 
     /** Is name a variable name? */
     def isVariableName(name: Name): Boolean = {
+      import Character.{isHighSurrogate, isLowSurrogate, isLetter, isLowerCase, isValidCodePoint, toCodePoint}
       val first = name.startChar
-      (    ((first.isLower && first.isLetter) || first == '_')
+      def isLowerLetterSupplementary: Boolean =
+        first == '$' && {
+          val decoded = name.decoded
+          isHighSurrogate(decoded.charAt(0)) && decoded.length > 1 && isLowSurrogate(decoded.charAt(1)) && {
+            val codepoint = toCodePoint(decoded.charAt(0), decoded.charAt(1))
+            isValidCodePoint(codepoint) && isLetter(codepoint) && isLowerCase(codepoint)
+          }
+        }
+      (    ((first.isLower && first.isLetter) || first == '_' || isLowerLetterSupplementary)
         && (name != nme.false_)
         && (name != nme.true_)
         && (name != nme.null_)
@@ -459,6 +473,7 @@ trait StdNames {
     def unexpandedName(name: Name): Name =
       name.lastIndexOf("$$") match {
         case 0 | -1 => name
+        case 1 if name.charAt(0) == '_' => if (name.isTermName) nme.WILDCARD else tpnme.WILDCARD
         case idx0   =>
           // Sketchville - We've found $$ but if it's part of $$$ or $$$$
           // or something we need to keep the bonus dollars, so e.g. foo$$$outer
@@ -657,6 +672,18 @@ trait StdNames {
     val int2Integer: NameType     = nameType("int2Integer")
     val long2Long: NameType       = nameType("long2Long")
     val boolean2Boolean: NameType = nameType("boolean2Boolean")
+
+    // Scala 3 import syntax
+    val as: NameType              = nameType("as")
+
+    // Scala 3 hard keywords
+    val `enum`: NameType          = nameType("enum")
+    val `export`: NameType        = nameType("export")
+    val `given`: NameType         = nameType("given")
+
+    // Scala 3 soft keywords
+    val infix: NameType           = nameType("infix")
+    val open: NameType            = nameType("open")
 
     // Compiler utilized names
 
@@ -901,6 +928,7 @@ trait StdNames {
     val state            : NameType       = nameType("state")
     val tr               : NameType       = nameType(s"tr$$async")
     val t                : NameType       = nameType(s"throwable$$async")
+    val trGetResult      : NameType       = nameType(s"tryGetResult$$async")
 
     // quasiquote interpolators:
     val q: NameType  = nameType("q")
@@ -960,6 +988,7 @@ trait StdNames {
       final val PLUS : NameType  = nameType("+")
       final val STAR : NameType  = nameType("*")
       final val TILDE: NameType  = nameType("~")
+      final val QMARK: NameType  = nameType("?")
 
       final val isUnary: Set[Name] = Set(MINUS, PLUS, TILDE, BANG)
     }
@@ -1245,6 +1274,15 @@ trait StdNames {
     final val WHILEkw: TermName        = kw("while")
 
     final val keywords = kw.result
+  }
+
+  // "The identifiers var, yield, and record are restricted identifiers because they are not allowed in some contexts"
+  // A type identifier is an identifier that is not the character sequence var, yield, or record.
+  // An unqualified method identifier is an identifier that is not the character sequence yield.
+  class JavaRestrictedIdentifiers {
+    final val RECORD: TermName = TermName("record")
+    final val VAR: TermName = TermName("var")
+    final val YIELD: TermName = TermName("yield")
   }
 
   sealed abstract class SymbolNames {

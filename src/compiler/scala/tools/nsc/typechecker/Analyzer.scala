@@ -13,8 +13,6 @@
 package scala.tools.nsc
 package typechecker
 
-import scala.reflect.internal.util.StatisticsStatics
-
 /** Defines the sub-components for the namer, packageobjects, and typer phases.
  */
 trait Analyzer extends AnyRef
@@ -54,6 +52,7 @@ trait Analyzer extends AnyRef
   object packageObjects extends {
     val global: Analyzer.this.global.type = Analyzer.this.global
   } with SubComponent {
+    val deferredOpen = perRunCaches.newSet[Symbol]()
     val phaseName = "packageobjects"
     val runsAfter = List[String]()
     val runsRightAfter= Some("namer")
@@ -66,6 +65,9 @@ trait Analyzer extends AnyRef
         override def traverse(tree: Tree): Unit = tree match {
           case ModuleDef(_, _, _) =>
             if (tree.symbol.name == nme.PACKAGEkw) {
+              // we've actually got a source file
+              deferredOpen.remove(tree.symbol.owner)
+
               openPackageModule(tree.symbol, tree.symbol.owner)
             }
           case ClassDef(_, _, _, _) => () // make it fast
@@ -75,6 +77,7 @@ trait Analyzer extends AnyRef
 
       def apply(unit: CompilationUnit): Unit = {
         openPackageObjectsTraverser(unit.body)
+        deferredOpen.foreach(openPackageModule(_))
       }
     }
   }
@@ -96,7 +99,7 @@ trait Analyzer extends AnyRef
       // compiler run). This is good enough for the resident compiler, which was the most affected.
       undoLog.clear()
       override def run(): Unit = {
-        val start = if (StatisticsStatics.areSomeColdStatsEnabled) statistics.startTimer(statistics.typerNanos) else null
+        val start = if (settings.areStatisticsEnabled) statistics.startTimer(statistics.typerNanos) else null
         global.echoPhaseSummary(this)
         val units = currentRun.units
         while (units.hasNext) {
@@ -106,7 +109,7 @@ trait Analyzer extends AnyRef
         finishComputeParamAlias()
         // defensive measure in case the bookkeeping in deferred macro expansion is buggy
         clearDelayed()
-        if (StatisticsStatics.areSomeColdStatsEnabled) statistics.stopTimer(statistics.typerNanos, start)
+        if (settings.areStatisticsEnabled) statistics.stopTimer(statistics.typerNanos, start)
       }
       def apply(unit: CompilationUnit): Unit = {
         try {

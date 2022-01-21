@@ -20,7 +20,6 @@ import scala.collection.mutable
 import scala.concurrent.{Await, Awaitable}
 import scala.util.chaining._
 import scala.util.{Failure, Success, Try}
-import scala.util.Properties.isJavaAtLeast
 import scala.util.control.{ControlThrowable, NonFatal}
 import java.time.Duration
 import java.util.concurrent.{CountDownLatch, TimeUnit}
@@ -28,6 +27,7 @@ import java.util.concurrent.atomic.AtomicReference
 import java.lang.ref._
 import java.lang.reflect.{Array => _, _}
 import java.util.IdentityHashMap
+import scala.annotation.nowarn
 
 /** This module contains additional higher-level assert statements
  *  that are ultimately based on junit.Assert primitives.
@@ -40,15 +40,27 @@ import java.util.IdentityHashMap
  */
 object AssertUtil {
 
-  /** Assert on Java 8, but on later versions, just print if assert would fail. */
-  def assert8(b: => Boolean, msg: => Any) =
-    if (!isJavaAtLeast(9))
-      assert(b, msg)
-    else if (!b)
-      println(s"assert not $msg")
-
   // junit fail is Unit
   def fail(message: String): Nothing = throw new AssertionError(message)
+
+  private val printable = raw"\p{Print}".r
+
+  def hexdump(s: String): Iterator[String] = {
+    import scala.io.Codec
+    val codec: Codec = Codec.UTF8
+    var offset = 0
+    def hex(bytes: Array[Byte])   = bytes.map(b => f"$b%02x").mkString(" ")
+    def charFor(byte: Byte): Char = byte.toChar match { case c @ printable() => c ; case _ => '.' }
+    def ascii(bytes: Array[Byte]) = bytes.map(charFor).mkString
+    def format(bytes: Array[Byte]): String =
+      f"$offset%08x  ${hex(bytes.slice(0, 8))}%-24s ${hex(bytes.slice(8, 16))}%-24s |${ascii(bytes)}|"
+        .tap(_ => offset += bytes.length)
+    s.getBytes(codec.charSet).grouped(16).map(format)
+  }
+
+  private def dump(s: String) = hexdump(s).mkString("\n")
+  def assertEqualStrings(expected: String)(actual: String) =
+    assert(expected == actual, s"Expected:\n${dump(expected)}\nActual:\n${dump(actual)}")
 
   private final val timeout = 60 * 1000L                 // wait a minute
 
@@ -116,6 +128,9 @@ object AssertUtil {
         throw ae
     }
 
+  def assertCond[A](x: A)(pf: PartialFunction[A, Boolean]): Unit    = assertTrue(PartialFunction.cond(x)(pf))
+  def assertCondNot[A](x: A)(pf: PartialFunction[A, Boolean]): Unit = assertFalse(PartialFunction.cond(x)(pf))
+
   def assertFails[U](checkMessage: String => Boolean)(body: => U): Unit = assertThrows[AssertionError](body, checkMessage)
 
   /** JUnit-style assertion for `IterableLike.sameElements`.
@@ -166,7 +181,7 @@ object AssertUtil {
   def assertZeroNetThreads(body: => Unit): Unit = {
     val group = new ThreadGroup("junit")
     try assertZeroNetThreads(group)(body)
-    finally group.destroy()
+    finally group.destroy(): @nowarn("cat=deprecation") // deprecated since JDK 16, will be removed
   }
   def assertZeroNetThreads[A](group: ThreadGroup)(body: => A): Try[A] = {
     val testDone = new CountDownLatch(1)
@@ -232,6 +247,12 @@ object AssertUtil {
    *  takes a long time, so long as we can verify progress.
    */
   def waitForIt(terminated: => Boolean, progress: Progress = Fast, label: => String = "test"): Unit = {
+    def value: Option[Boolean] = if (terminated) Some(true) else None
+    assertTrue(waitFor(value, progress, label))
+  }
+  /** Wait for a value or eventually throw.
+   */
+  def waitFor[A](value: => Option[A], progress: Progress = Fast, label: => String = "test"): A = {
     val limit = 5
     var n = 1
     var (dormancy, factor) = progress match {
@@ -239,14 +260,13 @@ object AssertUtil {
       case Fast => (250L, 4)
     }
     var period = 0L
+    var result: Option[A] = None
     var done = false
-    var ended = false
     while (!done && n < limit) {
       try {
-        ended = terminated
-        if (ended) {
-          done = true
-        } else {
+        result = value
+        done = result.nonEmpty
+        if (!done) {
           //println(s"Wait for test condition: $label")
           Thread.sleep(dormancy)
           period += dormancy
@@ -257,7 +277,10 @@ object AssertUtil {
       n += 1
       dormancy *= factor
     }
-    assertTrue(s"Expired after dormancy period $period waiting for termination condition $label", ended)
+    result match {
+      case Some(v) => v
+      case _ => fail(s"Expired after dormancy period $period waiting for termination condition $label")
+    }
   }
 
   /** How frequently to check a termination condition. */
@@ -294,7 +317,7 @@ class NoTrace[A](body: => A) extends Runnable {
       case Success(a) => result = Some(a)
       case Failure(e) => synchronized { uncaught += ((Thread.currentThread, e)) }
     }
-    finally group.destroy()
+    finally group.destroy(): @nowarn("cat=deprecation") // deprecated since JDK 16, will be removed
   }
 
   private[testkit] lazy val errors: List[(Thread, Throwable)] = synchronized(uncaught.toList)

@@ -160,7 +160,7 @@ trait MapOps[K, V, +CC[X, Y] <: MapOps[X, Y, CC, _], +C <: MapOps[K, V, CC, C]]
 
   def clear(): Unit = { keysIterator foreach -= }
 
-  override def clone(): C = empty ++= toIterable
+  override def clone(): C = empty ++= this
 
   @deprecated("Use filterInPlace instead", "2.13.0")
   @inline final def retain(p: (K, V) => Boolean): this.type = filterInPlace(p)
@@ -171,17 +171,19 @@ trait MapOps[K, V, +CC[X, Y] <: MapOps[X, Y, CC, _], +C <: MapOps[K, V, CC, C]]
     * @param p  The test predicate
     */
   def filterInPlace(p: (K, V) => Boolean): this.type = {
-    if (nonEmpty) {
-      val array = this.toArray[Any] // scala/bug#7269 toArray avoids ConcurrentModificationException
-      val arrayLength = array.length
-      var i = 0
-      while (i < arrayLength) {
-        val (k, v) = array(i).asInstanceOf[(K, V)]
-        if (!p(k, v)) {
-          this -= k
+    if (!isEmpty) this match {
+      case tm: concurrent.Map[_, _] => tm.asInstanceOf[concurrent.Map[K, V]].filterInPlaceImpl(p)
+      case _ =>
+        val array = this.toArray[Any] // scala/bug#7269 toArray avoids ConcurrentModificationException
+        val arrayLength = array.length
+        var i = 0
+        while (i < arrayLength) {
+          val (k, v) = array(i).asInstanceOf[(K, V)]
+          if (!p(k, v)) {
+            this -= k
+          }
+          i += 1
         }
-        i += 1
-      }
     }
     this
   }
@@ -197,8 +199,9 @@ trait MapOps[K, V, +CC[X, Y] <: MapOps[X, Y, CC, _], +C <: MapOps[K, V, CC, C]]
     * @return   the map itself.
     */
   def mapValuesInPlace(f: (K, V) => V): this.type = {
-    if (nonEmpty) this match {
+    if (!isEmpty) this match {
       case hm: mutable.HashMap[_, _] => hm.asInstanceOf[mutable.HashMap[K, V]].mapValuesInPlaceImpl(f)
+      case tm: concurrent.Map[_, _] => tm.asInstanceOf[concurrent.Map[K, V]].mapValuesInPlaceImpl(f)
       case _ =>
         val array = this.toArray[Any]
         val arrayLength = array.length

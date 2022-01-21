@@ -302,18 +302,15 @@ trait NamesDefaults { self: Analyzer =>
         case _ =>
           val byName   = isByNameParamType(paramTpe)
           val repeated = isScalaRepeatedParamType(paramTpe)
-          val argTpe = (
-            if (repeated) arg match {
+          // TODO In 83c9c764b, we tried to a stable type here to fix scala/bug#7234. But the resulting TypeTree over a
+          //      singleton type without an original TypeTree fails to retypecheck after a resetAttrs (scala/bug#7516),
+          //      which is important for (at least) macros.
+          val argTpe =
+            arg match {
+              case _ if !repeated        => arg.tpe
               case WildcardStarArg(expr) => expr.tpe
-              case _                     => seqType(arg.tpe)
+              case _                     => seqType(arg.tpe.widen)      // avoid constant type
             }
-            else {
-              // TODO In 83c9c764b, we tried to a stable type here to fix scala/bug#7234. But the resulting TypeTree over a
-              //      singleton type without an original TypeTree fails to retypecheck after a resetAttrs (scala/bug#7516),
-              //      which is important for (at least) macros.
-              arg.tpe
-            }
-          )
           val s = context.owner.newValue(freshTermName(nme.NAMEDARG_PREFIX)(typer.fresh), arg.pos, newFlags = ARTIFACT) setInfo {
             val tp = if (byName) functionType(Nil, argTpe) else argTpe
             uncheckedBounds(tp)
@@ -330,10 +327,11 @@ trait NamesDefaults { self: Analyzer =>
               res
             } else {
               new ChangeOwnerTraverser(context.owner, sym) traverse arg // fixes #4502
-              if (repeated) arg match {
+              arg match {
+                case _ if !repeated        => arg
                 case WildcardStarArg(expr) => expr
-                case _                     => blockTyper typed gen.mkSeqApply(resetAttrs(arg))
-              } else arg
+                case _                     => blockTyper.typed(gen.mkSeqApply(resetAttrs(arg)))
+              }
             }
           Some(atPos(body.pos)(ValDef(sym, body).setType(NoType)))
       }
@@ -478,9 +476,33 @@ trait NamesDefaults { self: Analyzer =>
   def defaultGetter(param: Symbol, context: Context): Symbol = {
     val i = param.owner.paramss.flatten.indexWhere(p => p.name == param.name) + 1
     if (i > 0) {
-      val defGetterName = nme.defaultGetterName(param.owner.name, i)
-      if (param.owner.isConstructor) {
-        val mod = companionSymbolOf(param.owner.owner, context)
+
+      def isScala3SyntheticApply(meth: Symbol): Boolean = {
+        // According to rules in Scala 3, a synthetic method named `apply`
+        // should use `<init>` as the prefix of its default getters,
+        // i.e. reuse the constructor's default getters.
+        // We add some more precision - also verify that `apply`
+        // is defined in a module which has a case class companion
+
+        def isModuleWithCaseClassCompanion(owner: Symbol) = (
+          owner.isModuleClass
+          && linkedClassOfClassOf(owner, context).isCaseClass
+        )
+
+        (meth.isScala3Defined
+          && meth.isSynthetic
+          && meth.name == nme.apply
+          && isModuleWithCaseClassCompanion(meth.owner))
+      }
+
+      val scala3SynthApply = isScala3SyntheticApply(param.owner)
+      val defGetterName = {
+        val methodName = if (scala3SynthApply) nme.CONSTRUCTOR else param.owner.name
+        nme.defaultGetterName(methodName, i)
+      }
+      if (scala3SynthApply || param.owner.isConstructor) {
+        val scope = param.owner.owner
+        val mod = if (scala3SynthApply) scope else companionSymbolOf(scope, context)
         mod.info.member(defGetterName)
       }
       else {

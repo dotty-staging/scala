@@ -10,9 +10,9 @@ In 2014, you -- the Scala community -- matched the core team at EPFL in number o
 
 We are super happy about this, and are eager to make your experience contributing to Scala productive and satisfying, so that we can keep up this growth. We can't do this alone (nor do we want to)!
 
-This is why we're collecting these notes on how to contribute, and we hope you'll share your experience to improve the process for the next contributor! (Feel free to send a PR for this note, send your thoughts to scala/contributors (Gitter) or contributors.scala-lang.org (Discourse).)
+This is why we're collecting these notes on how to contribute, and we hope you'll share your experience to improve the process for the next contributor! (Feel free to send a PR for this note, send your thoughts to \#scala-contributors (on [Discord](https://discord.com/invite/scala)) or contributors.scala-lang.org (Discourse).)
 
-By the way, the team at Lightbend is: @lrytz, @retronym, @SethTisue, and  @dwijnand.
+By the way, the team at Lightbend is: @lrytz, @retronym, @SethTisue, and @dwijnand.
 
 ## What kind of PR are you submitting?
 
@@ -115,8 +115,25 @@ To run a single negative test from sbt shell:
 root> partest --verbose test/files/neg/delayed-init-ref.scala
 ```
 
-To specify compiler flags such as `-Werror -Xlint`, you can add a comment
-at the top of your source file of the form: `// scalac: -Werror -Xlint`.
+A test can be either a single `.scala` file or a directory containing multiple `.scala` and `.java` files.
+For testing separate compilation, files can be grouped using `_N` suffixes in the filename. For example, a test
+with files (`A.scala`, `B_1.scala`, `C_1.java`, `Test_2.scala`) does:
+```
+scalac         A.scala            -d out
+scalac -cp out B_1.scala C_1.java -d out
+javac  -cp out C_1.java           -d out
+scalac -cp out Test_2.scala       -d out
+scala  -cp out Test
+```
+
+**Flags**
+  - To specify compiler flags such as `-Werror -Xlint`, you can add a comment at the top of your source file of the form: `// scalac: -Werror -Xlint`.
+  - Similarly, a `// javac: <flags>` comment in a Java source file passes flags to the Java compiler.
+  - A `// filter: <regex>` comment eliminates output lines that match the filter before comparing to the `.check` file.
+  - A `// java: <flags>` comment makes a `run` test execute in a separate JVM and passes the additional flags to the `java` command.
+  - A `// javaVersion <N[+| - M]>` comment makes partest skip the test if the java version is outside the requested range (e.g. `8`, `15+`, `9 - 11`)
+
+**Common Usage**
 
 To test that no warnings are emitted while compiling a `pos` test, use `-Werror`.
 That will fail a `pos` test if there are warnings. Note that `pos` tests do not have `.check` files.
@@ -171,7 +188,7 @@ See `--help` for more info:
 root> partest --help
 ```
 
-Partests are compiled by the `quick` compiler (and `run` partests executed with the `quick` library),
+Partests are compiled by the bootstrapped `quick` compiler (and `run` partests executed with the `quick` library),
 and therefore:
 
 * if you're working on the compiler, you must write a partest, or a `BytecodeTesting` JUnit test which invokes the compiler programmatically; however
@@ -268,8 +285,7 @@ See the [scala-jenkins-infra repo](https://github.com/scala/scala-jenkins-infra)
 ### Pass code review
 
 Your PR will need to be assigned to one or more reviewers. You can suggest reviewers
-yourself; if you're not sure, see the list in [README.md](README.md) or ask on scala/contributors (Gitter)
-or contributors.scala-lang.org (Discourse).
+yourself; if you're not sure, see the list in [README.md](README.md) or ask on \#scala-contributors (on [Discord](https://discord.com/invite/scala)) or contributors.scala-lang.org (Discourse).
 
 To assign a reviewer, add a "review by @reviewer" to the PR description or in a
 comment on your PR.
@@ -283,8 +299,8 @@ and `push -f` to the branch. This is to keep the git history clean. Additional c
 are OK if they stand on their own.
 
 Once all these conditions are met, we will merge your changes -- if we
-agree with it!  We are available on scala/contributors (Gitter) or
-contributors.scala-lang.org (Discourse) to discuss changes beforehand,
+agree with it!  We are available on \#scala-contributors (on [Discord](https://discord.com/invite/scala))
+or contributors.scala-lang.org (Discourse) to discuss changes beforehand,
 before you put in the coding work.
 
 

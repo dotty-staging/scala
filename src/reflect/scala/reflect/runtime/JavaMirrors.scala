@@ -38,7 +38,7 @@ import internal.Flags._
 import ReflectionUtils._
 import scala.annotation.nowarn
 import scala.reflect.api.TypeCreator
-import scala.runtime.{ BoxesRunTime, ScalaRunTime }
+import scala.runtime.{BoxesRunTime, ClassValueCompat, ScalaRunTime}
 
 private[scala] trait JavaMirrors extends internal.SymbolTable with api.JavaUniverse with TwoWayCaches { thisUniverse: SymbolTable =>
 
@@ -120,7 +120,7 @@ private[scala] trait JavaMirrors extends internal.SymbolTable with api.JavaUnive
     private[this] val fieldCache       = new TwoWayCache[jField, TermSymbol]
     private[this] val tparamCache      = new TwoWayCache[jTypeVariable[_ <: GenericDeclaration], TypeSymbol]
 
-    private[this] object typeTagCache extends ClassValue[jWeakReference[TypeTag[_]]]() {
+    private[this] object typeTagCache extends ClassValueCompat[jWeakReference[TypeTag[_]]]() {
       val typeCreator = new ThreadLocal[TypeCreator]()
 
       override protected def computeValue(cls: jClass[_]): jWeakReference[TypeTag[_]] = {
@@ -195,9 +195,9 @@ private[scala] trait JavaMirrors extends internal.SymbolTable with api.JavaUnive
       object AnnotationClass { def unapply(x: jClass[_]) = x.isAnnotation }
 
       object ConstantArg {
-        def enumToSymbol(enum: Enum[_]): Symbol = {
-          val staticPartOfEnum = classToScala(enum.getClass).companionSymbol
-          staticPartOfEnum.info.declaration(TermName(enum.name))
+        def enumToSymbol(`enum`: Enum[_]): Symbol = {
+          val staticPartOfEnum = classToScala(`enum`.getClass).companionSymbol
+          staticPartOfEnum.info.declaration(TermName(`enum`.name))
         }
 
         def unapply(schemaAndValue: (jClass[_], Any)): Option[Any] = schemaAndValue match {
@@ -638,7 +638,7 @@ private[scala] trait JavaMirrors extends internal.SymbolTable with api.JavaUnive
       def markAbsent(tpe: Type) = setAllInfos(clazz, module, tpe)
       def handleError(ex: Exception) = {
         markAbsent(ErrorType)
-        if (settings.debug) ex.printStackTrace()
+        if (settings.isDebug) ex.printStackTrace()
         val msg = ex.getMessage()
         MissingRequirementError.signal(
           (if (msg eq null) "reflection error while loading " + clazz.name

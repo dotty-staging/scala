@@ -28,15 +28,49 @@ trait Set[A]
 
   def canEqual(that: Any) = true
 
+  /**
+   * Equality of sets is implemented using the lookup method [[contains]]. This method returns `true` if
+   *   - the argument `that` is a `Set`,
+   *   - the two sets have the same [[size]], and
+   *   - for every `element` this set, `other.contains(element) == true`.
+   *
+   * The implementation of `equals` checks the [[canEqual]] method, so subclasses of `Set` can narrow down the equality
+   * to specific set types. The `Set` implementations in the standard library can all be compared, their `canEqual`
+   * methods return `true`.
+   *
+   * Note: The `equals` method only respects the equality laws (symmetry, transitivity) if the two sets use the same
+   * element equivalence function in their lookup operation. For example, the element equivalence operation in a
+   * [[scala.collection.immutable.TreeSet]] is defined by its ordering. Comparing a `TreeSet` with a `HashSet` leads
+   * to unexpected results if `ordering.equiv(e1, e2)` (used for lookup in `TreeSet`) is different from `e1 == e2`
+   * (used for lookup in `HashSet`).
+   *
+   * {{{
+   *   scala> import scala.collection.immutable._
+   *   scala> val ord: Ordering[String] = _ compareToIgnoreCase _
+   *
+   *   scala> TreeSet("A")(ord) == HashSet("a")
+   *   val res0: Boolean = false
+   *
+   *   scala> HashSet("a") == TreeSet("A")(ord)
+   *   val res1: Boolean = true
+   * }}}
+   *
+   *
+   * @param that The set to which this set is compared
+   * @return `true` if the two sets are equal according to the description
+   */
   override def equals(that: Any): Boolean =
     (this eq that.asInstanceOf[AnyRef]) || (that match {
-      case set: Set[A] if set.canEqual(this) =>
-        (this.size == set.size) && this.subsetOf(set)
+      case set: Set[A @unchecked] if set.canEqual(this) =>
+        (this.size == set.size) && {
+          try this.subsetOf(set)
+          catch { case _: ClassCastException => false } // PR #9565 / scala/bug#12228
+        }
       case _ =>
         false
     })
 
-  override def hashCode(): Int = MurmurHash3.setHash(toIterable)
+  override def hashCode(): Int = MurmurHash3.setHash(this)
 
   override def iterableFactory: IterableFactory[Set] = Set
 
@@ -81,7 +115,7 @@ trait SetOps[A, +CC[_], +C <: SetOps[A, CC, C]]
     */
   def subsets(len: Int): Iterator[C] = {
     if (len < 0 || len > size) Iterator.empty
-    else new SubsetsItr(toIterable.to(IndexedSeq), len)
+    else new SubsetsItr(this.to(IndexedSeq), len)
   }
 
   /** An iterator over all subsets of this set.
@@ -89,7 +123,7 @@ trait SetOps[A, +CC[_], +C <: SetOps[A, CC, C]]
     *  @return     the iterator.
     */
   def subsets(): Iterator[C] = new AbstractIterator[C] {
-    private[this] val elms = toIterable.to(IndexedSeq)
+    private[this] val elms = SetOps.this.to(IndexedSeq)
     private[this] var len = 0
     private[this] var itr: Iterator[C] = Iterator.empty
 
@@ -187,15 +221,15 @@ trait SetOps[A, +CC[_], +C <: SetOps[A, CC, C]]
     *  @return a new $coll with the given elements added, omitting duplicates.
     */
   def concat(that: collection.IterableOnce[A]): C = fromSpecific(that match {
-    case that: collection.Iterable[A] => new View.Concat(toIterable, that)
+    case that: collection.Iterable[A] => new View.Concat(this, that)
     case _ => iterator.concat(that.iterator)
   })
 
   @deprecated("Consider requiring an immutable Set or fall back to Set.union", "2.13.0")
-  def + (elem: A): C = fromSpecific(new View.Appended(toIterable, elem))
+  def + (elem: A): C = fromSpecific(new View.Appended(this, elem))
 
   @deprecated("Use ++ with an explicit collection argument instead of + with varargs", "2.13.0")
-  def + (elem1: A, elem2: A, elems: A*): C = fromSpecific(new View.Concat(new View.Appended(new View.Appended(toIterable, elem1), elem2), elems))
+  def + (elem1: A, elem2: A, elems: A*): C = fromSpecific(new View.Concat(new View.Appended(new View.Appended(this, elem1), elem2), elems))
 
   /** Alias for `concat` */
   @`inline` final def ++ (that: collection.IterableOnce[A]): C = concat(that)

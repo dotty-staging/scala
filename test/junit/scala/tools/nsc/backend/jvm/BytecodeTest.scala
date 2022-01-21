@@ -10,18 +10,19 @@ import scala.tools.testkit.ASMConverters._
 import scala.tools.testkit.BytecodeTesting
 import scala.tools.testkit.BytecodeTesting._
 import scala.tools.asm.Opcodes
+import scala.tools.asm.tree.MethodNode
 
 class BytecodeTest extends BytecodeTesting {
   import compiler._
 
   @Test
   def t10812(): Unit = {
-    val code =
-      """ A { def f: Object = null }
+    def code(prefix: String) =
+      s"""$prefix A { def f: Object = null }
         |object B extends A { override def f: String = "b" }
       """.stripMargin
     for (base <- List("trait", "class")) {
-      val List(a, bMirror, bModule) = compileClasses(base + code)
+      val List(a, bMirror, bModule) = compileClasses(code(base))
       assertEquals(bMirror.name, "B")
       assertEquals(bMirror.methods.asScala.filter(_.name == "f").map(m => m.name + m.desc).toList, List("f()Ljava/lang/String;"))
     }
@@ -201,6 +202,22 @@ class BytecodeTest extends BytecodeTesting {
     )
   }
 
+  @Test def `class constructor has correct line numbers (12470)`: Unit = {
+    val code =
+      """class A
+        |class B
+        |object D
+        |class C
+      """.stripMargin
+    val lines = Map("A" -> 1, "B" -> 2, "D$" -> 3, "C" -> 4)
+    compileClasses(code).foreach { c =>
+      c.methods.asScala.foreach(m => convertMethod(m).instructions.foreach {
+        case LineNumber(n, _) => assertEquals(s"class ${c.name} method ${m.name}", lines(c.name), n)
+        case _ =>
+      })
+    }
+  }
+
   @Test
   def sd233(): Unit = {
     val code = "def f = { println(1); synchronized(println(2)) }"
@@ -342,5 +359,56 @@ class BytecodeTest extends BytecodeTesting {
     val A = cs.find(_.name == "A11718").get
     val a = A.fields.asScala.find(_.name == "a").get
     assertEquals(0, a.access & Opcodes.ACC_FINAL)
+  }
+
+  @Test
+  def t12362(): Unit = {
+    val code                 =
+      """object Test {
+        |  def foo(value: String) = {
+        |    println(value)
+        |  }
+        |
+        |  def abcde(value1: String, value2: Long, value3: Double, value4: Int, value5: Double): Double = {
+        |    println(value1)
+        |    value5
+        |  }
+        |}""".stripMargin
+
+    val List(mirror, _) = compileClasses(code)
+    assertEquals(mirror.name, "Test")
+
+    val foo    = getAsmMethod(mirror, "foo")
+    val abcde  = getAsmMethod(mirror, "abcde")
+
+    def t(m: MethodNode, r: List[(String, String, Int)]) = {
+      assertTrue((m.access & Opcodes.ACC_STATIC) != 0)
+      assertEquals(r, m.localVariables.asScala.toList.map(l => (l.desc, l.name, l.index)))
+    }
+
+    t(foo, List(("Ljava/lang/String;", "value", 0)))
+    t(abcde, List(("Ljava/lang/String;", "value1", 0), ("J", "value2", 1), ("D", "value3", 3), ("I", "value4", 5), ("D", "value5", 6)))
+  }
+
+  @Test
+  def nonSpecializedValFence(): Unit = {
+    def code(u1: String) =
+      s"""abstract class Speck[@specialized(Int) T](t: T, sm: String, val sn: String) {
+         |  val a = t
+         |  $u1
+         |  lazy val u2 = "?"
+         |  var u3 = "?"
+         |  val u4: String
+         |  var u5: String
+         |}
+         |""".stripMargin
+
+    for (u1 <- "" :: List("", "private", "private[this]", "protected").map(mod => s"$mod val u1 = \"?\"")) {
+      for (c <- compileClasses(code(u1)).map(getMethod(_, "<init>")))
+        if (u1.isEmpty)
+          assertDoesNotInvoke(c, "releaseFence")
+        else
+          assertInvoke(c, "scala/runtime/Statics", "releaseFence")
+    }
   }
 }

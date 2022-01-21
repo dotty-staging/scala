@@ -16,7 +16,7 @@ package tools.nsc.transform.patmat
 import scala.collection.mutable
 import scala.collection.immutable.ArraySeq
 import scala.reflect.internal.util.Collections._
-import scala.reflect.internal.util.{HashSet, StatisticsStatics}
+import scala.reflect.internal.util.HashSet
 
 trait Logic extends Debugging {
   import global._
@@ -395,7 +395,7 @@ trait Logic extends Debugging {
     // according to subtyping, e.g., V = ConstantType(1) and V = Int are valid assignments
     // we rewrite V = C to a fresh boolean symbol, and model what we know about the variable's domain
     // in a prelude (the equality axioms)
-    //   1. a variable with a closed domain (of a sealed type) must be assigned one of the instantiatable types in its domain
+    //   1. a variable with a closed domain (of a sealed type) must be assigned one of the instantiable types in its domain
     //   2. for each variable V in props, and each constant C it is compared to,
     //      compute which assignments imply each other (as in the example above: V = 1 implies V = Int)
     //      and which assignments are mutually exclusive (V = String implies -(V = Int))
@@ -408,7 +408,7 @@ trait Logic extends Debugging {
     //       V1 = Nil implies -(V2 = Ci) for all Ci in V2's domain (i.e., it is unassignable)
     // may throw an AnalysisBudget.Exception
     def removeVarEq(props: List[Prop], modelNull: Boolean = false): (Prop, List[Prop]) = {
-      val start = if (StatisticsStatics.areSomeColdStatsEnabled) statistics.startTimer(statistics.patmatAnaVarEq) else null
+      val start = if (settings.areStatisticsEnabled) statistics.startTimer(statistics.patmatAnaVarEq) else null
 
       val vars = new mutable.LinkedHashSet[Var]
 
@@ -491,7 +491,7 @@ trait Logic extends Debugging {
       debug.patmat(s"eqAxioms:\n${eqAxiomsSeq.mkString("\n")}")
       debug.patmat(s"pure:${pure.mkString("\n")}")
 
-      if (StatisticsStatics.areSomeColdStatsEnabled) statistics.stopTimer(statistics.patmatAnaVarEq, start)
+      if (settings.areStatisticsEnabled) statistics.stopTimer(statistics.patmatAnaVarEq, start)
 
       (And(eqAxiomsSeq: _*), pure)
     }

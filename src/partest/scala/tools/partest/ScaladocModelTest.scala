@@ -72,7 +72,7 @@ abstract class ScaladocModelTest extends DirectTest {
 
     try {
       // 1 - compile with scaladoc and get the model out
-      val universe = model.getOrElse({sys.error("Scaladoc Model Test ERROR: No universe generated!")})
+      val universe = model.getOrElse { sys.error("Scaladoc Model Test ERROR: No universe generated!") }
       // 2 - check the model generated
       testModel(universe.rootPackage)
       println("Done.")
@@ -85,15 +85,15 @@ abstract class ScaladocModelTest extends DirectTest {
     System.setErr(prevErr)
   }
 
-  private[this] var settings: doc.Settings = null
+  private[this] var docSettings: doc.Settings = null
 
   // create a new scaladoc compiler
   def newDocFactory: DocFactory = {
-    settings = new doc.Settings(_ => ())
-    settings.scaladocQuietRun = true // yaay, no more "model contains X documentable templates"!
+    docSettings = new doc.Settings(_ => ())
+    docSettings.scaladocQuietRun = true // yaay, no more "model contains X documentable templates"!
     val args = extraSettings + " " + scaladocSettings
-    new ScalaDoc.Command((CommandLineParser tokenize (args)), settings) // side-effecting, I think
-    val docFact = new DocFactory(new ConsoleReporter(settings), settings)
+    new ScalaDoc.Command((CommandLineParser tokenize (args)), docSettings) // side-effecting, I think
+    val docFact = new DocFactory(new ConsoleReporter(docSettings), docSettings)
     docFact
   }
 

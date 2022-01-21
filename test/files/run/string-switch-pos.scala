@@ -10,9 +10,10 @@ object Test extends DirectTest {
       |    case "asdf"         => 2
       |    case "BbBb" if cond => 3
       |    case "BbBb"         => 4
+      |    case "CcCc" | "Cc2" => 5
       |  }
       |}
     """.stripMargin.trim
 
-  override def show(): Unit = Console.withErr(Console.out) { super.compile() }
+  override def show(): Unit = compile()
 }

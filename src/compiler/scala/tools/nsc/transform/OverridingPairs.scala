@@ -37,7 +37,7 @@ abstract class OverridingPairs extends SymbolPairs {
      *  including bridges. But it may be refined in subclasses.
      */
     override protected def exclude(sym: Symbol) = (
-         sym.isPrivateLocal
+        (sym.isPrivateLocal && sym.isParamAccessor)
       || sym.isArtifact
       || sym.isConstructor
       || (sym.isPrivate && sym.owner != base) // Privates aren't inherited. Needed for pos/t7475a.scala
@@ -54,8 +54,20 @@ abstract class OverridingPairs extends SymbolPairs {
       && (lowMemberType matches (self memberType high))
     ) // TODO we don't call exclude(high), should we?
 
-    override def skipOwnerPair(lowClass: Symbol, highClass: Symbol): Boolean =
-      lowClass.isJavaDefined && highClass.isJavaDefined // javac is already checking this better than we could
+    override protected def skipOwnerPair(lowClass: Symbol, highClass: Symbol): Boolean = {
+      // Two Java-defined methods can be skipped if javac will check the overrides. Skipping is actually necessary to
+      // avoid false errors, as Java doesn't have the Scala's linearization rules and subtyping rules
+      // (`Array[String] <:< Array[Object]`). However, when a Java interface is mixed into a Scala class, mixed-in
+      // methods need to go through override checking (neg/t12394, neg/t12380).
+      lowClass.isJavaDefined && highClass.isJavaDefined && { // skip if both are java-defined, and
+        lowClass.isNonBottomSubClass(highClass) || {         //  - low <:< high, which means they are overrides in Java and javac is doing the check; or
+          base.info.parents.tail.forall(p => {               //  - every mixin parent is unrelated to (not a subclass of) low and high, i.e.,
+            val psym = p.typeSymbol                          //    we're not mixing in high or low, both are coming from the superclass
+            !psym.isNonBottomSubClass(lowClass) && !psym.isNonBottomSubClass(highClass)
+          })
+        }
+      }
+    }
   }
 
   private def bothJavaOwnedAndEitherIsField(low: Symbol, high: Symbol): Boolean = {
