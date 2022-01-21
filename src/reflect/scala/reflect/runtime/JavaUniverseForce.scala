@@ -67,6 +67,7 @@ trait JavaUniverseForce { self: runtime.JavaUniverse  =>
     this.UseInvokeSpecial
     this.TypeParamVarargsAttachment
     this.KnownDirectSubclassesCalled
+    this.DottyEnumSingleton
     this.ConstructorNeedsFence
     this.MultiargInfixAttachment
     this.NullaryOverrideAdapted
@@ -204,6 +205,7 @@ trait JavaUniverseForce { self: runtime.JavaUniverse  =>
     this.abstractTypesToBounds
     this.dropIllegalStarTypes
     this.wildcardExtrapolation
+    this.SubstSymMap
     this.IsDependentCollector
     this.ApproximateDependentMap
     this.identityTypeMap
@@ -290,6 +292,7 @@ trait JavaUniverseForce { self: runtime.JavaUniverse  =>
     definitions.JavaEnumClass
     definitions.JavaUtilMap
     definitions.JavaUtilHashMap
+    definitions.JavaRecordClass
     definitions.ByNameParamClass
     definitions.JavaRepeatedParamClass
     definitions.RepeatedParamClass
@@ -520,9 +523,12 @@ trait JavaUniverseForce { self: runtime.JavaUniverse  =>
     uncurry.DesugaredParameterType
     erasure.GenericArray
     erasure.scalaErasure
+    erasure.scala3Erasure
     erasure.specialScalaErasure
+    erasure.specialScala3Erasure
     erasure.javaErasure
     erasure.verifiedJavaErasure
     erasure.boxingErasure
+    erasure.boxing3Erasure
   }
 }

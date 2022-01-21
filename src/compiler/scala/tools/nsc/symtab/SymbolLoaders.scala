@@ -19,7 +19,7 @@ import java.io.IOException
 import scala.reflect.internal.MissingRequirementError
 import scala.reflect.io.{AbstractFile, NoAbstractFile}
 import scala.tools.nsc.util.{ClassPath, ClassRepresentation}
-import scala.reflect.internal.util.{ReusableInstance, StatisticsStatics}
+import scala.reflect.internal.util.ReusableInstance
 import scala.tools.nsc.Reporting.WarningCategory
 
 /** This class ...
@@ -57,7 +57,7 @@ abstract class SymbolLoaders {
   }
 
   protected def signalError(root: Symbol, ex: Throwable): Unit = {
-    if (settings.debug) ex.printStackTrace()
+    if (settings.isDebug) ex.printStackTrace()
     globalError(ex.getMessage() match {
       case null => "i/o error while loading " + root.name
       case msg  => "error while loading " + root.name + ", " + msg
@@ -198,15 +198,16 @@ abstract class SymbolLoaders {
     }
   }
   private def nameOf(classRep: ClassRepresentation): TermName = {
-    while(true) {
-      val len = classRep.nameChars(nameCharBuffer)
-      if (len == -1) nameCharBuffer = new Array[Char](nameCharBuffer.length * 2)
-      else return newTermName(nameCharBuffer, 0, len)
+    val name = classRep.name
+    val nameLength = name.length
+    if (nameLength <= nameCharBuffer.length) {
+      name.getChars(0, nameLength, nameCharBuffer, 0)
+      newTermName(nameCharBuffer, 0, nameLength)
+    } else {
+      newTermName(name)
     }
-    throw new IllegalStateException()
   }
-  private var nameCharBuffer = new Array[Char](256)
-
+  private val nameCharBuffer = new Array[Char](512)
 
   /**
    * A lazy type that completes itself by calling parameter doComplete.
@@ -312,7 +313,7 @@ abstract class SymbolLoaders {
       }
     }
   }
-  private lazy val classFileDataReader: ReusableInstance[ReusableDataReader] = ReusableInstance[ReusableDataReader](new ReusableDataReader(), enabled = isCompilerUniverse)
+  private lazy val classFileDataReader: ReusableInstance[ReusableDataReader] = ReusableInstance[ReusableDataReader](new ReusableDataReader(), initialSize = 1, enabled = isCompilerUniverse)
   class ClassfileLoader(val classfile: AbstractFile, clazz: ClassSymbol, module: ModuleSymbol) extends SymbolLoader with FlagAssigningCompleter {
     private object classfileParser extends {
       val symbolTable: SymbolLoaders.this.symbolTable.type = SymbolLoaders.this.symbolTable
@@ -337,11 +338,11 @@ abstract class SymbolLoaders {
     protected def description = "class file "+ classfile.toString
 
     protected def doComplete(root: Symbol): Unit = {
-      val start = if (StatisticsStatics.areSomeColdStatsEnabled) statistics.startTimer(statistics.classReadNanos) else null
+      val start = if (settings.areStatisticsEnabled) statistics.startTimer(statistics.classReadNanos) else null
       classfileParser.parse(classfile, clazz, module)
       if (clazz.associatedFile eq NoAbstractFile) clazz.associatedFile = classfile
       if (module.associatedFile eq NoAbstractFile) module.associatedFile = classfile
-      if (StatisticsStatics.areSomeColdStatsEnabled) statistics.stopTimer(statistics.classReadNanos, start)
+      if (settings.areStatisticsEnabled) statistics.stopTimer(statistics.classReadNanos, start)
     }
     override def sourcefile: Option[AbstractFile] = classfileParser.srcfile
     override def associatedFile(self: Symbol): AbstractFile = classfile

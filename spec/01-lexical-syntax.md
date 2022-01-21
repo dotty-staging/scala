@@ -6,20 +6,18 @@ chapter: 1
 
 # Lexical Syntax
 
-Scala programs are written using the Unicode Basic Multilingual Plane
-(_BMP_) character set; Unicode supplementary characters are not
-presently supported.  This chapter defines the two modes of Scala's
-lexical syntax, the Scala mode, and the _XML mode_. If not
-otherwise mentioned, the following descriptions of Scala tokens refer
-to _Scala mode_, and literal characters ‘c’ refer to the ASCII fragment
-`\u0000` – `\u007F`.
+Scala source code consists of Unicode text.
+
+The program text is tokenized as described in this chapter.
+See the last section for special support for XML literals,
+which are parsed in _XML mode_.
 
 To construct tokens, characters are distinguished according to the following
 classes (Unicode general category given in parentheses):
 
 1. Whitespace characters. `\u0020 | \u0009 | \u000D | \u000A`.
 1. Letters, which include lower case letters (`Ll`), upper case letters (`Lu`),
-   title case letters (`Lt`), other letters (`Lo`), modifier letters (`Ml`), 
+   title case letters (`Lt`), other letters (`Lo`), modifier letters (`Lm`), 
    letter numerals (`Nl`) and the two characters `\u0024 ‘$’` and `\u005F ‘_’`.
 1. Digits `‘0’ | … | ‘9’`.
 1. Parentheses `‘(’ | ‘)’ | ‘[’ | ‘]’ | ‘{’ | ‘}’ `.
@@ -74,7 +72,7 @@ or `_`, and _constant identifiers_, which do not.
 For this purpose, lower case letters include not only a-z,
 but also all characters in Unicode category Ll (lowercase letter),
 as well as all letters that have contributory property
-Other_Lowercase, except characters in category Nl (letter numerals)
+Other_Lowercase, except characters in category Nl (letter numerals),
 which are never taken as lower case.
 
 The following are examples of variable identifiers:
@@ -579,16 +577,7 @@ string literal does not start a valid escape sequence.
 symbolLiteral  ::=  ‘'’ plainid
 ```
 
-A symbol literal `'x` is a shorthand for the expression `scala.Symbol("x")` and
-is of the [literal type](03-types.html#literal-types) `'x`.
-`Symbol` is a [case class](05-classes-and-objects.html#case-classes), which is defined as follows.
-
-```scala
-package scala
-final case class Symbol private (name: String) {
-  override def toString: String = "'" + name
-}
-```
+A symbol literal `'x` is deprecated shorthand for the expression `scala.Symbol("x")`.
 
 The `apply` method of `Symbol`'s companion object
 caches weak references to `Symbol`s, thus ensuring that

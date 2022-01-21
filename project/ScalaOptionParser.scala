@@ -82,7 +82,7 @@ object ScalaOptionParser {
   }
 
   // TODO retrieve these data programmatically, ala https://github.com/scala/scala-tool-support/blob/master/bash-completion/src/main/scala/BashCompletion.scala
-  private def booleanSettingNames = List("-X", "-Xasync", "-Xcheckinit", "-Xdev", "-Xdisable-assertions", "-Xexperimental", "-Xfatal-warnings", "-Xlog-free-terms", "-Xlog-free-types", "-Xlog-implicit-conversions", "-Xlog-implicits", "-Xlog-reflective-calls",
+  private def booleanSettingNames = List("-X", "-Xasync", "-Xcheckinit", "-Xdev", "-Xdisable-assertions", "-Xexperimental", "-Xfatal-warnings", "-Xlog-free-terms", "-Xlog-free-types", "-Xlog-implicit-conversions", "-Xlog-reflective-calls",
     "-Xno-forwarders", "-Xno-patmat-analysis", "-Xnon-strict-patmat-analysis", "-Xprint-pos", "-Xprint-types", "-Xprompt", "-Xresident", "-Xshow-phases", "-Xverify", "-Y",
     "-Ybreak-cycles", "-Ydebug", "-Ycompact-trees", "-YdisableFlatCpCaching", "-Ydoc-debug",
     "-Yide-debug",
@@ -97,7 +97,7 @@ object ScalaOptionParser {
     "-Vhot-statistics", "-Vide", "-Vimplicit-conversions", "-Vimplicits", "-Vissue",
     "-Vmacro", "-Vmacro-lite", "-Vpatmat", "-Vphases", "-Vpos", "-Vprint-pos",
     "-Vprint-types", "-Vquasiquote", "-Vreflective-calls", "-Vreify",
-    "-Vshow-member-pos", "-Vshow-symkinds", "-Vshow-symowners", "-Vsymbols", "-Vtyper",
+    "-Vshow-member-pos", "-Vshow-symkinds", "-Vshow-symowners", "-Vsymbols", "-Vtype-diffs", "-Vtyper",
     "-W",
     "-Wdead-code", "-Werror", "-Wextra-implicit", "-Wnumeric-widen", "-Woctal-literal",
     "-Wvalue-discard", "-Wself-implicit",
@@ -140,5 +140,5 @@ object ScalaOptionParser {
   private def scaladocPathSettingNames = List("-doc-root-content", "-diagrams-dot-path")
   private def scaladocMultiStringSettingNames = List("-doc-external-doc")
 
-  private val targetSettingNames = (8 to 17).map(_.toString).flatMap(v => v :: s"jvm-1.$v" :: s"jvm-$v" :: s"1.$v" :: Nil).toList
+  private val targetSettingNames = (8 to 18).map(_.toString).flatMap(v => v :: s"jvm-1.$v" :: s"jvm-$v" :: s"1.$v" :: Nil).toList
 }

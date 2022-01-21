@@ -42,8 +42,11 @@ abstract class DirectTest {
   def testPath   = SFile(sys.props("partest.test-path"))
   def testOutput = Directory(sys.props("partest.output"))
 
+  protected def pathOf(locations: String*) = locations.mkString(sys.props("path.separator"))
+
   // override to add additional settings besides -d testOutput.path
-  def extraSettings: String = ""
+  // default is -usejavacp
+  def extraSettings: String = "-usejavacp"
   // a default Settings object using only extraSettings
   def settings: Settings = newSettings(CommandLineParser.tokenize(extraSettings))
   // settings factory using given args and also debug settings

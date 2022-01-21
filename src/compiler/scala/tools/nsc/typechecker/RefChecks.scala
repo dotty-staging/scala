@@ -53,8 +53,8 @@ abstract class RefChecks extends Transform {
   def newTransformer(unit: CompilationUnit): RefCheckTransformer =
     new RefCheckTransformer(unit)
 
-  val toJavaRepeatedParam  = new SubstSymMap(RepeatedParamClass -> JavaRepeatedParamClass)
-  val toScalaRepeatedParam = new SubstSymMap(JavaRepeatedParamClass -> RepeatedParamClass)
+  val toJavaRepeatedParam  = SubstSymMap(RepeatedParamClass -> JavaRepeatedParamClass)
+  val toScalaRepeatedParam = SubstSymMap(JavaRepeatedParamClass -> RepeatedParamClass)
 
   def accessFlagsToString(sym: Symbol) = flagsToString(
     sym getFlag (PRIVATE | PROTECTED),
@@ -148,7 +148,7 @@ abstract class RefChecks extends Transform {
       }
 
       // This has become noisy with implicit classes.
-      if (settings.warnPolyImplicitOverload && settings.developer) {
+      if (settings.isDeveloper && settings.warnPolyImplicitOverload) {
         clazz.info.decls.foreach(sym => if (sym.isImplicit && sym.typeParams.nonEmpty) {
           // implicit classes leave both a module symbol and a method symbol as residue
           val alts = clazz.info.decl(sym.name).alternatives filterNot (_.isModule)
@@ -303,7 +303,7 @@ abstract class RefChecks extends Transform {
         def isNeitherInClass = memberClass != clazz && otherClass != clazz
 
         val indent = "  "
-        def overriddenWithAddendum(msg: String, foundReq: Boolean = settings.debug.value): String = {
+        def overriddenWithAddendum(msg: String, foundReq: Boolean = settings.isDebug): String = {
           val isConcreteOverAbstract =
             (otherClass isSubClass memberClass) && other.isDeferred && !member.isDeferred
           val addendum =
@@ -383,7 +383,7 @@ abstract class RefChecks extends Transform {
           def isOverrideAccessOK = member.isPublic || {      // member is public, definitely same or relaxed access
             (!other.isProtected || member.isProtected) &&    // if o is protected, so is m
             ((!isRootOrNone(ob) && ob.hasTransOwner(mb)) ||  // m relaxes o's access boundary
-            (other.isJavaDefined && other.isProtected))      // overriding a protected java member, see #3946 #12349
+             (other.isJavaDefined && other.isProtected))     // overriding a protected java member, see #3946 #12349
           }
           if (!isOverrideAccessOK) {
             overrideAccessError()
@@ -1215,14 +1215,18 @@ abstract class RefChecks extends Transform {
       finally popLevel()
     }
 
+    private def showCurrentRef: String = {
+      val refsym = currentLevel.refsym
+      s"$refsym defined on line ${refsym.pos.line}"
+    }
+
     def transformStat(tree: Tree, index: Int): Tree = tree match {
       case t if treeInfo.isSelfConstrCall(t) =>
         assert(index == 0, index)
         try transform(tree)
         finally if (currentLevel.maxindex > 0) {
-          // An implementation restriction to avoid VerifyErrors and lazyvals mishaps; see scala/bug#4717
-          debuglog("refsym = " + currentLevel.refsym)
-          reporter.error(currentLevel.refpos, "forward reference not allowed from self constructor invocation")
+          // An implementation restriction to avoid VerifyErrors and lazy vals mishaps; see scala/bug#4717
+          reporter.error(currentLevel.refpos, s"forward reference to $showCurrentRef not allowed from self constructor invocation")
         }
       case ValDef(_, _, _, _) =>
         val tree1 = transform(tree) // important to do before forward reference check
@@ -1230,8 +1234,7 @@ abstract class RefChecks extends Transform {
         else {
           val sym = tree.symbol
           if (sym.isLocalToBlock && index <= currentLevel.maxindex) {
-            debuglog("refsym = " + currentLevel.refsym)
-            reporter.error(currentLevel.refpos, "forward reference extends over definition of " + sym)
+            reporter.error(currentLevel.refpos, s"forward reference to $showCurrentRef extends over definition of $sym")
           }
           tree1
         }
@@ -1404,40 +1407,87 @@ abstract class RefChecks extends Transform {
         false
     }
 
-    private def checkTypeRef(tp: Type, tree: Tree, skipBounds: Boolean) = tp match {
-      case TypeRef(pre, sym, args) =>
-        tree match {
-          case tt: TypeTree if tt.original == null => // scala/bug#7783 don't warn about inferred types
-                                                      // FIXME: reconcile this check with one in resetAttrs
-          case _ => checkUndesiredProperties(sym, tree.pos)
-        }
-        if(sym.isJavaDefined)
-          sym.typeParams foreach (_.cookJavaRawInfo())
-        if (!tp.isHigherKinded && !skipBounds)
-          checkBounds(tree, pre, sym.owner, sym.typeParams, args)
-      case _ =>
-    }
+    private object RefCheckTypeMap extends TypeMap {
+      object UnboundExistential extends TypeMap {
+        private[this] val bound = mutable.Set.empty[Symbol]
 
-    private def checkTypeRefBounds(tp: Type, tree: Tree) = {
-      var skipBounds = false
-      tp match {
-        case AnnotatedType(ann :: Nil, underlying) if ann.symbol == UncheckedBoundsClass =>
+        def toWildcardIn(tpe: Type): Type =
+          try apply(tpe) finally bound.clear()
+
+        override def apply(tpe: Type): Type = tpe match {
+          case ExistentialType(quantified, _) =>
+            bound ++= quantified
+            tpe.mapOver(this)
+          case tpe =>
+            val sym = tpe.typeSymbol
+            if (sym.isExistential && !bound(sym)) WildcardType
+            else tpe.mapOver(this)
+        }
+      }
+
+      private[this] var inPattern = false
+      private[this] var skipBounds = false
+      private[this] var tree: Tree = EmptyTree
+
+      def check(tpe: Type, tree: Tree, inPattern: Boolean = false): Type = {
+        this.inPattern = inPattern
+        this.tree = tree
+        try apply(tpe) finally {
+          this.inPattern = false
+          this.skipBounds = false
+          this.tree = EmptyTree
+        }
+      }
+
+      // check all bounds, except those that are existential type parameters
+      // or those within typed annotated with @uncheckedBounds
+      override def apply(tpe: Type): Type = tpe match {
+        case tpe: AnnotatedType if tpe.hasAnnotation(UncheckedBoundsClass) =>
+          // scala/bug#7694 Allow code synthesizers to disable checking of bounds for TypeTrees based on inferred LUBs
+          // which might not conform to the constraints.
+          val savedSkipBounds = skipBounds
           skipBounds = true
-          underlying
+          try tpe.mapOver(this).filterAnnotations(_.symbol != UncheckedBoundsClass)
+          finally skipBounds = savedSkipBounds
+        case tpe: TypeRef =>
+          if (!inPattern) checkTypeRef(UnboundExistential.toWildcardIn(tpe))
+          checkUndesired(tpe.sym)
+          tpe.mapOver(this)
+        case tpe =>
+          tpe.mapOver(this)
+      }
+
+      private def checkTypeRef(tpe: Type): Unit = tpe match {
         case TypeRef(pre, sym, args) =>
-          if (!tp.isHigherKinded && !skipBounds)
+          if (sym.isJavaDefined)
+            sym.typeParams.foreach(_.cookJavaRawInfo())
+          if (!tpe.isHigherKinded && !skipBounds)
             checkBounds(tree, pre, sym.owner, sym.typeParams, args)
-          tp
         case _ =>
-          tp
+      }
+
+      private def checkUndesired(sym: Symbol): Unit = tree match {
+        // scala/bug#7783 don't warn about inferred types
+        // FIXME: reconcile this check with one in resetAttrs
+        case tree: TypeTree if tree.original == null =>
+        case tree => checkUndesiredProperties(sym, tree.pos)
       }
     }
 
     private def applyRefchecksToAnnotations(tree: Tree): Unit = {
+      def checkVarArgs(tp: Type, tree: Tree): Unit = tp match {
+        case TypeRef(_, VarargsClass, _) =>
+          tree match {
+            case tt: TypeTree if tt.original == null => // same exception as in checkTypeRef
+            case _: DefDef =>
+            case _ => reporter.error(tree.pos, s"Only methods can be marked @varargs")
+          }
+        case _ =>
+      }
       def applyChecks(annots: List[AnnotationInfo]): List[AnnotationInfo] = if (annots.isEmpty) Nil else {
         annots.foreach { ann =>
-          checkTypeRef(ann.atp, tree, skipBounds = false)
-          checkTypeRefBounds(ann.atp, tree)
+          checkVarArgs(ann.atp, tree)
+          RefCheckTypeMap.check(ann.atp, tree)
           if (ann.original != null && ann.original.hasExistingSymbol)
             checkUndesiredProperties(ann.original.symbol, tree.pos)
         }
@@ -1486,7 +1536,7 @@ abstract class RefChecks extends Transform {
           reporter.error(sym.pos, s"${sym.name}: Only concrete methods can be marked @elidable.$rest")
         }
       }
-      if (currentRun.isScala213) checkIsElidable(tree.symbol)
+      checkIsElidable(tree.symbol)
 
       def checkMember(sym: Symbol): Unit = {
         sym.setAnnotations(applyChecks(sym.annotations))
@@ -1742,29 +1792,7 @@ abstract class RefChecks extends Transform {
               }
             }
 
-            val existentialParams = new ListBuffer[Symbol]
-            var skipBounds = false
-            // check all bounds, except those that are existential type parameters
-            // or those within typed annotated with @uncheckedBounds
-            if (!inPattern) tree.tpe foreach {
-              case tp @ ExistentialType(tparams, tpe) =>
-                existentialParams ++= tparams
-              case ann: AnnotatedType if ann.hasAnnotation(UncheckedBoundsClass) =>
-                // scala/bug#7694 Allow code synthesizers to disable checking of bounds for TypeTrees based on inferred LUBs
-                // which might not conform to the constraints.
-                skipBounds = true
-              case tp: TypeRef =>
-                val tpWithWildcards = deriveTypeWithWildcards(existentialParams.toList)(tp)
-                checkTypeRef(tpWithWildcards, tree, skipBounds)
-              case _ =>
-            }
-            if (skipBounds) {
-              tree.setType(tree.tpe.map {
-                _.filterAnnotations(_.symbol != UncheckedBoundsClass)
-              })
-            }
-
-            tree
+            tree.setType(RefCheckTypeMap.check(tree.tpe, tree, inPattern))
 
           case TypeApply(fn, args) =>
             checkBounds(tree, NoPrefix, NoSymbol, fn.tpe.typeParams, args map (_.tpe))
@@ -1798,6 +1826,10 @@ abstract class RefChecks extends Transform {
 
           case x @ Select(_, _) =>
             transformSelect(x)
+
+          case Literal(Constant(tpe: Type)) =>
+            RefCheckTypeMap.check(tpe, tree)
+            tree
 
           case UnApply(fun, args) =>
             transform(fun) // just make sure we enterReference for unapply symbols, note that super.transform(tree) would not transform(fun)
@@ -1868,7 +1900,7 @@ abstract class RefChecks extends Transform {
         result1
       } catch {
         case ex: TypeError =>
-          if (settings.debug) ex.printStackTrace()
+          if (settings.isDebug) ex.printStackTrace()
           reporter.error(tree.pos, ex.getMessage())
           tree
       } finally {

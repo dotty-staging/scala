@@ -123,7 +123,7 @@ object ArrayOps {
   private[collection] final class ArrayIterator[@specialized(Specializable.Everything) A](xs: Array[A]) extends AbstractIterator[A] with Serializable {
     private[this] var pos = 0
     private[this] val len = xs.length
-    override def knownSize = len - pos
+    override def knownSize: Int = len - pos
     def hasNext: Boolean = pos < len
     def next(): A = try {
       val r = xs(pos)
@@ -131,7 +131,12 @@ object ArrayOps {
       r
     } catch { case _: ArrayIndexOutOfBoundsException => Iterator.empty.next() }
     override def drop(n: Int): Iterator[A] = {
-      if (n > 0) pos = Math.min(xs.length, pos + n)
+      if (n > 0) {
+        val newPos = pos + n
+        pos =
+          if (newPos < 0 /* overflow */) len
+          else Math.min(len, newPos)
+      }
       this
     }
   }
@@ -1569,18 +1574,18 @@ final class ArrayOps[A](private val xs: Array[A]) extends AnyVal {
     *                ''n'' times in `that`, then the first ''n'' occurrences of `x` will not form
     *                part of the result, but any following occurrences will.
     */
-  def diff[B >: A](that: Seq[B]): Array[A] = mutable.ArraySeq.make(xs).diff(that).array.asInstanceOf[Array[A]]
+  def diff[B >: A](that: Seq[B]): Array[A] = mutable.ArraySeq.make(xs).diff(that).toArray[A]
 
   /** Computes the multiset intersection between this array and another sequence.
-    *
-    *  @param that   the sequence of elements to intersect with.
-    *  @return       a new array which contains all elements of this array
-    *                which also appear in `that`.
-    *                If an element value `x` appears
-    *                ''n'' times in `that`, then the first ''n'' occurrences of `x` will be retained
-    *                in the result, but any following occurrences will be omitted.
-    */
-  def intersect[B >: A](that: Seq[B]): Array[A] = mutable.ArraySeq.make(xs).intersect(that).array.asInstanceOf[Array[A]]
+   *
+   *   @param that   the sequence of elements to intersect with.
+   *   @return       a new array which contains all elements of this array
+   *                 which also appear in `that`.
+   *                 If an element value `x` appears
+   *                 ''n'' times in `that`, then the first ''n'' occurrences of `x` will be retained
+   *                 in the result, but any following occurrences will be omitted.
+   */
+  def intersect[B >: A](that: Seq[B]): Array[A] = mutable.ArraySeq.make(xs).intersect(that).toArray[A]
 
   /** Groups elements in fixed size blocks by passing a "sliding window"
     *  over them (as opposed to partitioning them, as is done in grouped.)
@@ -1592,7 +1597,7 @@ final class ArrayOps[A](private val xs: Array[A]) extends AnyVal {
     *          last element (which may be the only element) will be truncated
     *          if there are fewer than `size` elements remaining to be grouped.
     */
-  def sliding(size: Int, step: Int = 1): Iterator[Array[A]] = mutable.ArraySeq.make(xs).sliding(size, step).map(_.array.asInstanceOf[Array[A]])
+  def sliding(size: Int, step: Int = 1): Iterator[Array[A]] = mutable.ArraySeq.make(xs).sliding(size, step).map(_.toArray[A])
 
   /** Iterates over combinations.  A _combination_ of length `n` is a subsequence of
     *  the original array, with the elements taken in order.  Thus, `Array("x", "y")` and `Array("y", "y")`
@@ -1609,7 +1614,7 @@ final class ArrayOps[A](private val xs: Array[A]) extends AnyVal {
     *  Array("a", "b", "b", "b", "c").combinations(2) == Iterator(Array(a, b), Array(a, c), Array(b, b), Array(b, c))
     *  }}}
     */
-  def combinations(n: Int): Iterator[Array[A]] = mutable.ArraySeq.make(xs).combinations(n).map(_.array.asInstanceOf[Array[A]])
+  def combinations(n: Int): Iterator[Array[A]] = mutable.ArraySeq.make(xs).combinations(n).map(_.toArray[A])
 
   /** Iterates over distinct permutations.
     *
@@ -1618,7 +1623,7 @@ final class ArrayOps[A](private val xs: Array[A]) extends AnyVal {
     *  Array("a", "b", "b").permutations == Iterator(Array(a, b, b), Array(b, a, b), Array(b, b, a))
     *  }}}
     */
-  def permutations: Iterator[Array[A]] = mutable.ArraySeq.make(xs).permutations.map(_.array.asInstanceOf[Array[A]])
+  def permutations: Iterator[Array[A]] = mutable.ArraySeq.make(xs).permutations.map(_.toArray[A])
 
   // we have another overload here, so we need to duplicate this method
   /** Tests whether this array contains the given sequence at a given index.

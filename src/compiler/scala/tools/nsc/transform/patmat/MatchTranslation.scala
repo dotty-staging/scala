@@ -12,8 +12,6 @@
 
 package scala.tools.nsc.transform.patmat
 
-import scala.reflect.internal.util.StatisticsStatics
-
 /** Translate typed Trees that represent pattern matches into the patternmatching IR, defined by TreeMakers.
  */
 trait MatchTranslation {
@@ -125,16 +123,9 @@ trait MatchTranslation {
             // TODO: the outer check is mandated by the spec for case classes, but we do it for user-defined unapplies as well [SPEC]
             // (the prefix of the argument passed to the unapply must equal the prefix of the type of the binder)
             val typeTest = TypeTestTreeMaker(binder, binder, paramType, paramType)(pos, extractorArgTypeTest = true)
-            val binderKnownNonNull = typeTest impliesBinderNonNull binder
-            // skip null test if it's implied
-            if (binderKnownNonNull) {
-              val unappBinder = typeTest.nextBinder
-              (typeTest :: treeMakers(unappBinder, pos), unappBinder)
-            } else {
-              val nonNullTest = NonNullTestTreeMaker(typeTest.nextBinder, paramType, pos)
-              val unappBinder = nonNullTest.nextBinder
-              (typeTest :: nonNullTest :: treeMakers(unappBinder, pos), unappBinder)
-            }
+            // binder is known non-null because the type test would not succeed on `null`
+            val unappBinder = typeTest.nextBinder
+            (typeTest :: treeMakers(unappBinder, pos), unappBinder)
           }
         }
 
@@ -209,7 +200,7 @@ trait MatchTranslation {
 
       debug.patmat("translating "+ cases.mkString("{", "\n", "}"))
 
-      val start = if (StatisticsStatics.areSomeColdStatsEnabled) statistics.startTimer(statistics.patmatNanos) else null
+      val start = if (settings.areStatisticsEnabled) statistics.startTimer(statistics.patmatNanos) else null
 
       val selectorTp = repeatedToSeq(elimAnonymousClass(selector.tpe.withoutAnnotations))
 
@@ -225,7 +216,7 @@ trait MatchTranslation {
       // pt = Any* occurs when compiling test/files/pos/annotDepMethType.scala
       val combined = combineCases(selector, selectorSym, nonSyntheticCases map translateCase(selectorSym, pt), pt, selectorPos, matchOwner, defaultOverride, getSuppression(selector))
 
-      if (StatisticsStatics.areSomeColdStatsEnabled) statistics.stopTimer(statistics.patmatNanos, start)
+      if (settings.areStatisticsEnabled) statistics.stopTimer(statistics.patmatNanos, start)
       combined
     }
 

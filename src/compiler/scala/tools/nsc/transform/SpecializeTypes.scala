@@ -14,7 +14,7 @@ package scala
 package tools.nsc
 package transform
 
-import scala.annotation.nowarn
+import scala.annotation.{nowarn, tailrec}
 import scala.collection.mutable
 import scala.tools.nsc.symtab.Flags
 import scala.tools.nsc.Reporting.WarningCategory
@@ -600,14 +600,22 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
        * specialized subclass of "clazz" throughout this file.
        */
 
+      val clazzName = specializedName(clazz, env0).toTypeName
       // scala/bug#5545: Eliminate classes with the same name loaded from the bytecode already present - all we need to do is
       // to force .info on them, as their lazy type will be evaluated and the symbols will be eliminated. Unfortunately
       // evaluating the info after creating the specialized class will mess the specialized class signature, so we'd
-      // better evaluate it before creating the new class symbol
-      val clazzName = specializedName(clazz, env0).toTypeName
+      // better unlink the the class-file backed symbol before creating the new class symbol
       val bytecodeClazz = clazz.owner.info.decl(clazzName)
       // debuglog("Specializing " + clazz + ", but found " + bytecodeClazz + " already there")
-      bytecodeClazz.info
+      def unlink(sym: Symbol): Unit = if (sym != NoSymbol) {
+        devWarningIf(sym.hasCompleteInfo)("Stale specialized symbol has been accessed: " + sym)
+        sym.setInfo(NoType)
+        sym.owner.info.decls.unlink(sym)
+      }
+      unlink(bytecodeClazz)
+      val companionModule = bytecodeClazz.companionModule
+      unlink(companionModule.moduleClass)
+      unlink(companionModule)
 
       val sClass = {
         val sc = clazz.owner.newClass(clazzName, clazz.pos, (clazz.flags | SPECIALIZED) & ~CASE)
@@ -736,123 +744,138 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
         enterMember(om)
       }
 
-      for (m <- normMembers if needsSpecialization(fullEnv, m) && satisfiable(fullEnv)) {
-        if (!m.isDeferred)
-          addConcreteSpecMethod(m)
-        // specialized members have to be overridable.
-        if (m.isPrivate)
-          m.resetFlag(PRIVATE).setFlag(PROTECTED)
+      @tailrec def isTraitValSetter(sym: Symbol): Boolean =
+        sym.isSetter && sym.getterIn(sym.owner).isStable &&
+          (sym.hasFlag(SYNTHESIZE_IMPL_IN_SUBCLASS) || isTraitValSetter(sym.nextOverriddenSymbol))
 
-        if (m.isConstructor) {
-          val specCtor = enterMember(cloneInSpecializedClass(m, x => x))
-          info(specCtor) = Forward(m)
-        }
-        else if (isNormalizedMember(m)) {  // methods added by normalization
-          val NormalizedMember(original) = info(m): @unchecked
-          if (nonConflicting(env ++ typeEnv(m))) {
-            if (info(m).degenerate) {
-              debuglog("degenerate normalized member " + m.defString)
-              val specMember = enterMember(cloneInSpecializedClass(m, _ & ~DEFERRED))
+      for (m <- normMembers) {
+        if (!needsSpecialization(fullEnv, m)) {
+          if (m.isValue && !m.isMutable && !m.isMethod && !m.isDeferred && !m.isLazy && !m.isParamAccessor) {
+            // non-specialized `val` fields are made mutable (in Constructors) and assigned from the
+            // constructors of specialized subclasses. See PR scala/scala#9704.
+            clazz.primaryConstructor.updateAttachment(ConstructorNeedsFence)
+            sClass.primaryConstructor.updateAttachment(ConstructorNeedsFence)
+          }
+        } else if (satisfiable(fullEnv)) {
+          if (!m.isDeferred)
+            addConcreteSpecMethod(m)
+          // specialized members have to be overridable.
+          if (m.isPrivate)
+            m.resetFlag(PRIVATE).setFlag(PROTECTED)
 
-              info(specMember)    = Implementation(original)
-              typeEnv(specMember) = env ++ typeEnv(m)
-            } else {
-              val om = forwardToOverload(m)
-              debuglog("normalizedMember " + m + " om: " + om + " " + pp(typeEnv(om)))
+          if (m.isConstructor) {
+            val specCtor = enterMember(cloneInSpecializedClass(m, x => x))
+            info(specCtor) = Forward(m)
+          }
+          else if (isNormalizedMember(m)) { // methods added by normalization
+            val NormalizedMember(original) = info(m): @unchecked
+            if (nonConflicting(env ++ typeEnv(m))) {
+              if (info(m).degenerate) {
+                debuglog("degenerate normalized member " + m.defString)
+                val specMember = enterMember(cloneInSpecializedClass(m, _ & ~DEFERRED))
+
+                info(specMember) = Implementation(original)
+                typeEnv(specMember) = env ++ typeEnv(m)
+              } else {
+                val om = forwardToOverload(m)
+                debuglog("normalizedMember " + m + " om: " + om + " " + pp(typeEnv(om)))
+              }
             }
+            else
+              debuglog("conflicting env for " + m + " env: " + env)
           }
-          else
-            debuglog("conflicting env for " + m + " env: " + env)
-        }
-        else if (m.isDeferred && m.isSpecialized) { // abstract methods
-          val specMember = enterMember(cloneInSpecializedClass(m, _ | DEFERRED))
-          // debuglog("deferred " + specMember.fullName + " remains abstract")
+          else if (m.isDeferred && m.isSpecialized) { // abstract methods
+            val specMember = enterMember(cloneInSpecializedClass(m, _ | DEFERRED))
+            // debuglog("deferred " + specMember.fullName + " remains abstract")
 
-          info(specMember) = Abstract(specMember)
-          // was: new Forward(specMember) {
-          //   override def target = m.owner.info.member(specializedName(m, env))
-          // }
-        } else if (m.hasFlag(SUPERACCESSOR)) { // basically same as abstract case
-          // we don't emit a specialized overload for the super accessor because we can't jump back and forth
-          // between specialized and non-specialized methods during an invokespecial for the super call,
-          // so, we must jump immediately into the non-specialized world to find our super
-          val specMember = enterMember(cloneInSpecializedClass(m, f => f))
+            info(specMember) = Abstract(specMember)
+            // was: new Forward(specMember) {
+            //   override def target = m.owner.info.member(specializedName(m, env))
+            // }
+          } else if (m.hasFlag(SUPERACCESSOR)) { // basically same as abstract case
+            // we don't emit a specialized overload for the super accessor because we can't jump back and forth
+            // between specialized and non-specialized methods during an invokespecial for the super call,
+            // so, we must jump immediately into the non-specialized world to find our super
+            val specMember = enterMember(cloneInSpecializedClass(m, f => f))
 
-          // rebindSuper in mixins knows how to rejigger this
-          // (basically it skips this specialized class in the base class seq, and then also never rebinds to a specialized method)
-          specMember.asInstanceOf[TermSymbol].referenced = m.alias
+            // rebindSuper in mixins knows how to rejigger this
+            // (basically it skips this specialized class in the base class seq, and then also never rebinds to a specialized method)
+            specMember.asInstanceOf[TermSymbol].referenced = m.alias
 
-          info(specMember) = SpecialSuperAccessor(specMember)
-        } else if (m.isMethod && !m.hasFlag(DEFERRED) && (!m.hasFlag(ACCESSOR) || m.hasFlag(LAZY))) { // other concrete methods
-          forwardToOverload(m)
-        } else if (m.isValue && !m.isMethod) { // concrete value definition
-          def mkAccessor(field: Symbol, name: Name) = {
-            val newFlags = (SPECIALIZED | m.getterIn(clazz).flags) & ~(LOCAL | CASEACCESSOR | PARAMACCESSOR)
-            // we rely on the super class to initialize param accessors
-            val sym = sClass.newMethod(name.toTermName, field.pos, newFlags)
-            info(sym) = SpecializedAccessor(field)
-            sym
-          }
-          def overrideIn(clazz: Symbol, sym: Symbol) = {
-            val newFlags = (sym.flags | OVERRIDE | SPECIALIZED) & ~(DEFERRED | CASEACCESSOR | PARAMACCESSOR)
-            val sym1     = sym.cloneSymbol(clazz, newFlags)
-            sym1.modifyInfo(_.asSeenFrom(clazz.tpe, sym1.owner))
-          }
-          val specVal = specializedOverload(sClass, m, env)
-
-          addConcreteSpecMethod(m)
-          specVal.asInstanceOf[TermSymbol].setAlias(m)
-
-          enterMember(specVal)
-          // create accessors
-
-          if (m.isLazy) {
-            // no getters needed (we'll specialize the compute method and accessor separately), can stay private
-            // m.setFlag(PRIVATE) -- TODO: figure out how to leave the non-specialized lazy var private
-            // (the implementation needs it to be visible while duplicating and retypechecking,
-            //  but it really could be private in bytecode)
-            specVal.setFlag(PRIVATE)
-          }
-          else if (nme.isLocalName(m.name)) {
-            val specGetter = mkAccessor(specVal, specVal.getterName) setInfo MethodType(Nil, specVal.info)
-            val origGetter = overrideIn(sClass, m.getterIn(clazz))
-            info(origGetter) = Forward(specGetter)
-            enterMember(specGetter)
-            enterMember(origGetter)
-            debuglog("specialize accessor in %s: %s -> %s".format(sClass.name.decode, origGetter.name.decode, specGetter.name.decode))
-
-            clazz.caseFieldAccessors.find(_.name.startsWith(m.name)) foreach { cfa =>
-              val cfaGetter = overrideIn(sClass, cfa)
-              info(cfaGetter) = SpecializedAccessor(specVal)
-              enterMember(cfaGetter)
-              debuglog("override case field accessor %s -> %s".format(m.name.decode, cfaGetter.name.decode))
+            info(specMember) = SpecialSuperAccessor(specMember)
+          } else if (m.isMethod && !m.isDeferred && (!m.isAccessor || m.isLazy || isTraitValSetter(m))) { // other concrete methods
+            forwardToOverload(m)
+          } else if (m.isValue && !m.isMethod) { // concrete value definition
+            def mkAccessor(field: Symbol, name: Name) = {
+              val newFlags = (SPECIALIZED | m.getterIn(clazz).flags) & ~(LOCAL | CASEACCESSOR | PARAMACCESSOR)
+              // we rely on the super class to initialize param accessors
+              val sym = sClass.newMethod(name.toTermName, field.pos, newFlags)
+              info(sym) = SpecializedAccessor(field)
+              sym
             }
 
-            if (specVal.isVariable && m.setterIn(clazz) != NoSymbol) {
-              val specSetter = mkAccessor(specVal, specGetter.setterName)
-                .resetFlag(STABLE)
-              specSetter.setInfo(MethodType(specSetter.newSyntheticValueParams(List(specVal.info)),
-                                            UnitTpe))
-              val origSetter = overrideIn(sClass, m.setterIn(clazz))
-              info(origSetter) = Forward(specSetter)
-              enterMember(specSetter)
-              enterMember(origSetter)
+            def overrideIn(clazz: Symbol, sym: Symbol) = {
+              val newFlags = (sym.flags | OVERRIDE | SPECIALIZED) & ~(DEFERRED | CASEACCESSOR | PARAMACCESSOR)
+              val sym1 = sym.cloneSymbol(clazz, newFlags)
+              sym1.modifyInfo(_.asSeenFrom(clazz.tpe, sym1.owner))
+            }
+
+            val specVal = specializedOverload(sClass, m, env)
+
+            addConcreteSpecMethod(m)
+            specVal.asInstanceOf[TermSymbol].setAlias(m)
+
+            enterMember(specVal)
+            // create accessors
+
+            if (m.isLazy) {
+              // no getters needed (we'll specialize the compute method and accessor separately), can stay private
+              // m.setFlag(PRIVATE) -- TODO: figure out how to leave the non-specialized lazy var private
+              // (the implementation needs it to be visible while duplicating and retypechecking,
+              //  but it really could be private in bytecode)
+              specVal.setFlag(PRIVATE)
+            }
+            else if (nme.isLocalName(m.name)) {
+              val specGetter = mkAccessor(specVal, specVal.getterName) setInfo MethodType(Nil, specVal.info)
+              val origGetter = overrideIn(sClass, m.getterIn(clazz))
+              info(origGetter) = Forward(specGetter)
+              enterMember(specGetter)
+              enterMember(origGetter)
+              debuglog("specialize accessor in %s: %s -> %s".format(sClass.name.decode, origGetter.name.decode, specGetter.name.decode))
+
+              clazz.caseFieldAccessors.find(_.name.startsWith(m.name)) foreach { cfa =>
+                val cfaGetter = overrideIn(sClass, cfa)
+                info(cfaGetter) = SpecializedAccessor(specVal)
+                enterMember(cfaGetter)
+                debuglog("override case field accessor %s -> %s".format(m.name.decode, cfaGetter.name.decode))
+              }
+
+              if (specVal.isVariable && m.setterIn(clazz) != NoSymbol) {
+                val specSetter = mkAccessor(specVal, specGetter.setterName)
+                  .resetFlag(STABLE)
+                specSetter.setInfo(MethodType(specSetter.newSyntheticValueParams(List(specVal.info)),
+                  UnitTpe))
+                val origSetter = overrideIn(sClass, m.setterIn(clazz))
+                info(origSetter) = Forward(specSetter)
+                enterMember(specSetter)
+                enterMember(origSetter)
+              }
+            }
+            else { // if there are no accessors, specialized methods will need to access this field in specialized subclasses
+              m.resetFlag(PRIVATE)
+              specVal.resetFlag(PRIVATE)
+              debuglog("no accessors for %s/%s, specialized methods must access field in subclass".format(
+                m.name.decode, specVal.name.decode))
             }
           }
-          else { // if there are no accessors, specialized methods will need to access this field in specialized subclasses
-            m.resetFlag(PRIVATE)
-            specVal.resetFlag(PRIVATE)
-            debuglog("no accessors for %s/%s, specialized methods must access field in subclass".format(
-              m.name.decode, specVal.name.decode))
+          else if (m.isClass) {
+            val specClass: Symbol = cloneInSpecializedClass(m, x => x)
+            typeEnv(specClass) = fullEnv
+            specClass setName specializedName(specClass, fullEnv).toTypeName
+            enterMember(specClass)
+            debuglog("entered specialized class " + specClass.fullName)
+            info(specClass) = SpecializedInnerClass(m, fullEnv)
           }
-        }
-        else if (m.isClass) {
-          val specClass: Symbol = cloneInSpecializedClass(m, x => x)
-          typeEnv(specClass) = fullEnv
-          specClass setName specializedName(specClass, fullEnv).toTypeName
-          enterMember(specClass)
-          debuglog("entered specialized class " + specClass.fullName)
-          info(specClass) = SpecializedInnerClass(m, fullEnv)
         }
       }
       sClass
@@ -1393,7 +1416,16 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
       }
     }
 
-    protected override def newBodyDuplicator(context: Context): SpecializeBodyDuplicator = new SpecializeBodyDuplicator(context)
+    private class SpecializeNamer(context: Context) extends Namer(context) {
+      // Avoid entering synthetic trees during specialization because the duplicated trees already contain them.
+      override def enterSyntheticSym(tree: Tree): Symbol = tree.symbol
+    }
+
+    protected override def newBodyDuplicator(context: Context): SpecializeBodyDuplicator =
+      new SpecializeBodyDuplicator(context)
+
+    override def newNamer(context: Context): Namer =
+      new SpecializeNamer(context)
   }
 
   /** Introduced to fix scala/bug#7343: Phase ordering problem between Duplicators and Specialization.
@@ -1459,7 +1491,7 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
      *  in order to be accessible from specialized subclasses.
      */
     override def transform(tree: Tree): Tree = tree match {
-      case Select(qual, name) =>
+      case Select(_, _) =>
         val sym = tree.symbol
         if (sym.isPrivate) debuglog(
           "seeing private member %s, currentClass: %s, owner: %s, isAccessible: %b, isLocalName: %b".format(
@@ -1903,32 +1935,35 @@ abstract class SpecializeTypes extends InfoTransform with TypingTransformers {
       debuglog("specializing body of" + symbol.defString)
       val DefDef(_, _, tparams, vparams :: Nil, tpt, _) = tree: @unchecked
       val env = typeEnv(symbol)
-      val origtparams = source.typeParams.filter(tparam => !env.contains(tparam) || !isPrimitiveValueType(env(tparam)))
-      if (origtparams.nonEmpty || symbol.typeParams.nonEmpty)
-        debuglog("substituting " + origtparams + " for " + symbol.typeParams)
+
+      val srcVparams = parameters(source)
+      val srcTparams = source.typeParams.filter(tparam => !env.contains(tparam) || !isPrimitiveValueType(env(tparam)))
+      if (settings.isDebug && (srcTparams.nonEmpty || symbol.typeParams.nonEmpty))
+        debuglog("substituting " + srcTparams + " for " + symbol.typeParams)
 
       // skolemize type parameters
-      val oldtparams = tparams map (_.symbol)
-      val newtparams = deriveFreshSkolems(oldtparams)
-      map2(tparams, newtparams)(_ setSymbol _)
+      val oldTparams = tparams.map(_.symbol)
+      val newTparams = deriveFreshSkolems(oldTparams)
+      map2(tparams, newTparams)(_ setSymbol _)
 
       // create fresh symbols for value parameters to hold the skolem types
-      val newSyms = cloneSymbolsAtOwnerAndModify(vparams map (_.symbol), symbol, _.substSym(oldtparams, newtparams))
+      val oldVparams = vparams.map(_.symbol)
+      val newVparams = cloneSymbolsAtOwnerAndModify(oldVparams, symbol, _.substSym(oldTparams, newTparams))
+
+      val srcParams = srcVparams ::: srcTparams
+      val oldParams = oldVparams ::: oldTparams
+      val newParams = newVparams ::: newTparams
 
       // replace value and type parameters of the old method with the new ones
       // log("Adding body for " + tree.symbol + " - origtparams: " + origtparams + "; tparams: " + tparams)
       // log("Type vars of: " + source + ": " + source.typeParams)
       // log("Type env of: " + tree.symbol + ": " + boundTvars)
       // log("newtparams: " + newtparams)
-      val symSubstituter = new ImplementationAdapter(
-        parameters(source) ::: origtparams,
-        newSyms ::: newtparams,
-        source.enclClass,
-        false) // don't make private fields public
-
-      val newBody = symSubstituter(body(source).duplicate)
-      tpt modifyType (_.substSym(oldtparams, newtparams))
-      copyDefDef(tree)(vparamss = List(newSyms map ValDef.apply), rhs = newBody)
+      // don't make private fields public
+      val substituter = new ImplementationAdapter(srcParams, newParams, source.enclClass, false)
+      val newRhs = substituter(body(source).duplicate)
+      tpt.modifyType(_.substSym(oldParams, newParams))
+      copyDefDef(tree)(vparamss = newVparams.map(ValDef.apply) :: Nil, rhs = newRhs)
     }
 
     /** Create trees for specialized members of 'sClass', based on the

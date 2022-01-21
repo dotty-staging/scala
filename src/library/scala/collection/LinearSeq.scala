@@ -248,7 +248,7 @@ trait LinearSeqOps[+A, +CC[X] <: LinearSeq[X], +C <: LinearSeq[A] with LinearSeq
 trait StrictOptimizedLinearSeqOps[+A, +CC[X] <: LinearSeq[X], +C <: LinearSeq[A] with StrictOptimizedLinearSeqOps[A, CC, C]] extends Any with LinearSeqOps[A, CC, C] with StrictOptimizedSeqOps[A, CC, C] {
   // A more efficient iterator implementation than the default LinearSeqIterator
   override def iterator: Iterator[A] = new AbstractIterator[A] {
-    private[this] var current: Iterable[A] = toIterable
+    private[this] var current = StrictOptimizedLinearSeqOps.this
     def hasNext = !current.isEmpty
     def next() = { val r = current.head; current = current.tail; r }
   }
@@ -276,7 +276,12 @@ private[collection] final class LinearSeqIterator[A](coll: LinearSeqOps[A, Linea
   // A call-by-need cell
   private[this] final class LazyCell(st: => LinearSeqOps[A, LinearSeq, LinearSeq[A]]) { lazy val v = st }
 
-  private[this] var these: LazyCell = new LazyCell(coll)
+  private[this] var these: LazyCell = {
+    // Reassign reference to avoid creating a private class field and holding a reference to the head.
+    // LazyCell would otherwise close over `coll`.
+    val initialHead = coll
+    new LazyCell(initialHead)
+  }
 
   def hasNext: Boolean = these.v.nonEmpty
 

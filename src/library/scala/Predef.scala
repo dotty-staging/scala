@@ -137,9 +137,8 @@ object Predef extends LowPriorityImplicits {
   @inline def valueOf[T](implicit vt: ValueOf[T]): T = vt.value
 
   /** The `String` type in Scala has all the methods of the underlying
-   *  `java.lang.String`, of which it is just an alias.
-   *  (See the documentation corresponding to your Java version,
-   *  for example [[https://docs.oracle.com/javase/8/docs/api/java/lang/String.html]].)
+   *  [[java.lang.String]], of which it is just an alias.
+   *
    *  In addition, extension methods in [[scala.collection.StringOps]]
    *  are added implicitly through the conversion [[augmentString]].
    *  @group aliases
@@ -367,6 +366,7 @@ object Predef extends LowPriorityImplicits {
      *  Format strings are as for `String.format`
      *  (@see java.lang.String.format).
      */
+    @deprecated("Use `formatString.format(value)` instead of `value.formatted(formatString)`,\nor use the `f\"\"` string interpolator. In Java 15 and later, `formatted` resolves to the new method in String which has reversed parameters.", "2.12.16")
     @inline def formatted(fmtstr: String): String = fmtstr format self
   }
 

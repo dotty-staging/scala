@@ -35,6 +35,19 @@ trait TreeOps { self: TastyUniverse =>
     }
   }
 
+  def showTree(tree: Tree): String = {
+    // here we want to avoid forcing the symbols of type trees,
+    // so instead substitute the type tree with an Identifier
+    // of the `showType`, which does not force.
+    val tree1 = tree.transform(new u.Transformer {
+      override def transform(tree: Tree) = tree match {
+        case tree: u.TypeTree => u.Ident(s"${showType(tree.tpe, wrap = false)}") // ident prints its name directly
+        case tree => super.transform(tree)
+      }
+    })
+    u.show(tree1)
+  }
+
   object tpd {
 
     @inline final def Constant(value: Any): Constant =
@@ -44,10 +57,10 @@ trait TreeOps { self: TastyUniverse =>
       new TastyIdent(name).setType(tpe)
 
     @inline final def Select(qual: Tree, name: TastyName)(implicit ctx: Context): Tree =
-      selectImpl(qual, name)(implicit ctx => namedMemberOfPrefix(qual.tpe, name))
+      selectImpl(qual, name)(implicit ctx => lookupTypeFrom(qual.tpe)(qual.tpe, name))
 
     @inline final def Select(owner: Type)(qual: Tree, name: TastyName)(implicit ctx: Context): Tree =
-      selectImpl(qual, name)(implicit ctx => namedMemberOfTypeWithPrefix(qual.tpe, owner, name))
+      selectImpl(qual, name)(implicit ctx => lookupTypeFrom(owner)(qual.tpe, name))
 
     private def selectImpl(qual: Tree, name: TastyName)(lookup: Context => Type)(implicit ctx: Context): Tree = {
 
@@ -57,17 +70,10 @@ trait TreeOps { self: TastyUniverse =>
       def selectCtor(qual: Tree) =
         u.Select(qual, u.nme.CONSTRUCTOR).setType(qual.tpe.typeSymbol.primaryConstructor.tpe)
 
-      if (ctx.mode.is(ReadAnnotation) && name.isSignedConstructor) {
-        val cls = qual.tpe.typeSymbol
-        cls.ensureCompleted() // need to force flags
-        if (cls.isJavaAnnotation)
-          selectCtor(qual)
-        else
-          selectName(qual, name)(lookup)
-      }
-      else {
+      if (ctx.mode.is(ReadAnnotationCtor) && name.isSignedConstructor)
+        selectCtor(qual)
+      else
         selectName(qual, name)(lookup)
-      }
 
     }
 

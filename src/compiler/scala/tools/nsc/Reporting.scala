@@ -80,11 +80,11 @@ trait Reporting extends internal.Reporting { self: ast.Positions with Compilatio
     def suppressionExists(pos: Position): Boolean =
       suppressions.getOrElse(pos.source, Nil).exists(_.annotPos.point == pos.point)
 
-    def warnUnusedSuppressions(): Unit = {
-      // if we stop before typer completes (errors in parser, Ystop), report all suspended messages
+    def runFinished(hasErrors: Boolean): Unit = {
+      // report suspended messages (in case the run finished before typer)
       suspendedMessages.valuesIterator.foreach(_.foreach(issueWarning))
-      // scaladoc doesn't run all phases, so not all warnings are emitted
-      if (settings.warnUnusedNowarn && !settings.isScaladoc)
+      // report unused nowarns only if all all phases are done. scaladoc doesn't run all phases.
+      if (!hasErrors && settings.warnUnusedNowarn && !settings.isScaladoc)
         for {
           source <- suppressions.keysIterator.toList
           sups   <- suppressions.remove(source)
@@ -246,8 +246,12 @@ trait Reporting extends internal.Reporting { self: ast.Positions with Compilatio
         && parentFileName(pos.source).getOrElse("") == "xsbt"
         && Thread.currentThread.getStackTrace.exists(_.getClassName.startsWith("sbt."))
       )
-      if (required && !isSbtCompat) reporter.error(pos, msg)
-      else warning(pos, msg, featureCategory(featureTrait.nameString), site)
+      // on postfix error, include interesting infix warning
+      def isXfix = featureName == "postfixOps" && suspendedMessages.get(pos.source).map(_.exists(w => pos.includes(w.pos))).getOrElse(false)
+      if (required && !isSbtCompat) {
+        val amended = if (isXfix) s"$msg\n${suspendedMessages(pos.source).filter(pos includes _.pos).map(_.msg).mkString("\n")}" else msg
+        reporter.error(pos, amended)
+      } else warning(pos, msg, featureCategory(featureTrait.nameString), site)
     }
 
     // Used in the optimizer where we don't have no symbols, the site string is created from the class internal name and method name.

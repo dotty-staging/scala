@@ -22,10 +22,10 @@ import scala.annotation.migration
   * instances of a type.
   *
   * Ordering's companion object defines many implicit objects to deal with
-  * subtypes of AnyVal (e.g. Int, Double), String, and others.
+  * subtypes of [[AnyVal]] (e.g. `Int`, `Double`), `String`, and others.
   *
   * To sort instances by one or more member variables, you can take advantage
-  * of these built-in orderings using Ordering.by and Ordering.on:
+  * of these built-in orderings using [[Ordering.by]] and [[Ordering.on]]:
   *
   * {{{
   * import scala.util.Sorting
@@ -38,9 +38,10 @@ import scala.annotation.migration
   * Sorting.quickSort(pairs)(Ordering[(Int, String)].on(x => (x._3, x._1)))
   * }}}
   *
-  * An Ordering[T] is implemented by specifying compare(a:T, b:T), which
-  * decides how to order two instances a and b. Instances of Ordering[T] can be
-  * used by things like scala.util.Sorting to sort collections like Array[T].
+  * An `Ordering[T]` is implemented by specifying the [[compare]] method,
+  * `compare(a: T, b: T): Int`, which decides how to order two instances
+  * `a` and `b`. Instances of `Ordering[T]` can be used by things like
+  * `scala.util.Sorting` to sort collections like `Array[T]`.
   *
   * For example:
   *
@@ -52,21 +53,21 @@ import scala.annotation.migration
   *
   * // sort by age
   * object AgeOrdering extends Ordering[Person] {
-  *   def compare(a:Person, b:Person) = a.age compare b.age
+  *   def compare(a:Person, b:Person) = a.age.compare(b.age)
   * }
   * Sorting.quickSort(people)(AgeOrdering)
   * }}}
   *
-  * This trait and scala.math.Ordered both provide this same functionality, but
-  * in different ways. A type T can be given a single way to order itself by
-  * extending Ordered. Using Ordering, this same type may be sorted in many
-  * other ways. Ordered and Ordering both provide implicits allowing them to be
+  * This trait and [[scala.math.Ordered]] both provide this same functionality, but
+  * in different ways. A type `T` can be given a single way to order itself by
+  * extending `Ordered`. Using `Ordering`, this same type may be sorted in many
+  * other ways. `Ordered` and `Ordering` both provide implicits allowing them to be
   * used interchangeably.
   *
-  * You can import scala.math.Ordering.Implicits to gain access to other
+  * You can `import scala.math.Ordering.Implicits._` to gain access to other
   * implicit orderings.
   *
-  * @see [[scala.math.Ordered]], [[scala.util.Sorting]]
+  * @see [[scala.math.Ordered]], [[scala.util.Sorting]], [[scala.math.Ordering.Implicits]]
   */
 @annotation.implicitNotFound(msg = "No implicit Ordering defined for ${T}.")
 trait Ordering[T] extends Comparator[T] with PartialOrdering[T] with Serializable {
@@ -258,7 +259,7 @@ object Ordering extends LowPriorityOrderingImplicits {
 
     override def equals(obj: scala.Any): Boolean = obj match {
       case that: AnyRef if this eq that => true
-      case that: Reverse[T]             => this.outer == that.outer
+      case that: Reverse[_]             => this.outer == that.outer
       case _                            => false
     }
     override def hashCode(): Int = outer.hashCode() * reverseSeed
@@ -279,7 +280,7 @@ object Ordering extends LowPriorityOrderingImplicits {
 
     override def equals(obj: scala.Any): Boolean = obj match {
       case that: AnyRef if this eq that  => true
-      case that: IterableOrdering[CC, T] => this.ord == that.ord
+      case that: IterableOrdering[_, _]  => this.ord == that.ord
       case _                             => false
     }
     override def hashCode(): Int = ord.hashCode() * iterableSeed
@@ -591,7 +592,7 @@ object Ordering extends LowPriorityOrderingImplicits {
 
     override def equals(obj: scala.Any): Boolean = obj match {
       case that: AnyRef if this eq that => true
-      case that: OptionOrdering[T]      => this.optionOrdering == that.optionOrdering
+      case that: OptionOrdering[_]      => this.optionOrdering == that.optionOrdering
       case _                            => false
     }
     override def hashCode(): Int = optionOrdering.hashCode() * optionSeed
@@ -622,7 +623,7 @@ object Ordering extends LowPriorityOrderingImplicits {
 
     override def equals(obj: scala.Any): Boolean = obj match {
       case that: AnyRef if this eq that => true
-      case that: Tuple2Ordering[T1, T2] =>
+      case that: Tuple2Ordering[_, _] =>
         this.ord1 == that.ord1 &&
         this.ord2 == that.ord2
       case _ => false
@@ -646,7 +647,7 @@ object Ordering extends LowPriorityOrderingImplicits {
 
     override def equals(obj: scala.Any): Boolean = obj match {
       case that: AnyRef if this eq that => true
-      case that: Tuple3Ordering[T1, T2, T3] =>
+      case that: Tuple3Ordering[_, _, _] =>
         this.ord1 == that.ord1 &&
         this.ord2 == that.ord2 &&
         this.ord3 == that.ord3
@@ -675,7 +676,7 @@ object Ordering extends LowPriorityOrderingImplicits {
 
     override def equals(obj: scala.Any): Boolean = obj match {
       case that: AnyRef if this eq that => true
-      case that: Tuple4Ordering[T1, T2, T3, T4] =>
+      case that: Tuple4Ordering[_, _, _, _] =>
         this.ord1 == that.ord1 &&
         this.ord2 == that.ord2 &&
         this.ord3 == that.ord3 &&
@@ -708,7 +709,7 @@ object Ordering extends LowPriorityOrderingImplicits {
 
     override def equals(obj: scala.Any): Boolean = obj match {
       case that: AnyRef if this eq that => true
-      case that: Tuple5Ordering[T1, T2, T3, T4, T5] =>
+      case that: Tuple5Ordering[_, _, _, _, _] =>
         this.ord1 == that.ord1 &&
         this.ord2 == that.ord2 &&
         this.ord3 == that.ord3 &&
@@ -745,7 +746,7 @@ object Ordering extends LowPriorityOrderingImplicits {
 
     override def equals(obj: scala.Any): Boolean = obj match {
       case that: AnyRef if this eq that => true
-      case that: Tuple6Ordering[T1, T2, T3, T4, T5, T6] =>
+      case that: Tuple6Ordering[_, _, _, _, _, _] =>
         this.ord1 == that.ord1 &&
         this.ord2 == that.ord2 &&
         this.ord3 == that.ord3 &&
@@ -786,7 +787,7 @@ object Ordering extends LowPriorityOrderingImplicits {
 
     override def equals(obj: scala.Any): Boolean = obj match {
       case that: AnyRef if this eq that => true
-      case that: Tuple7Ordering[T1, T2, T3, T4, T5, T6, T7] =>
+      case that: Tuple7Ordering[_, _, _, _, _, _, _] =>
         this.ord1 == that.ord1 &&
         this.ord2 == that.ord2 &&
         this.ord3 == that.ord3 &&
@@ -831,7 +832,7 @@ object Ordering extends LowPriorityOrderingImplicits {
 
     override def equals(obj: scala.Any): Boolean = obj match {
       case that: AnyRef if this eq that => true
-      case that: Tuple8Ordering[T1, T2, T3, T4, T5, T6, T7, T8] =>
+      case that: Tuple8Ordering[_, _, _, _, _, _, _, _] =>
         this.ord1 == that.ord1 &&
         this.ord2 == that.ord2 &&
         this.ord3 == that.ord3 &&
@@ -880,7 +881,7 @@ object Ordering extends LowPriorityOrderingImplicits {
 
     override def equals(obj: scala.Any): Boolean = obj match {
       case that: AnyRef if this eq that => true
-      case that: Tuple9Ordering[T1, T2, T3, T4, T5, T6, T7, T8, T9] =>
+      case that: Tuple9Ordering[_, _, _, _, _, _, _, _, _] =>
         this.ord1 == that.ord1 &&
         this.ord2 == that.ord2 &&
         this.ord3 == that.ord3 &&

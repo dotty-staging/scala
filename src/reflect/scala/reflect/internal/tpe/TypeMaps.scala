@@ -663,21 +663,46 @@ private[internal] trait TypeMaps {
     override def toString = s"AsSeenFromMap($seenFromPrefix, $seenFromClass)"
   }
 
-  /** A base class to compute all substitutions */
-  abstract class SubstMap[T](from: List[Symbol], to: List[T]) extends TypeMap {
-    // OPT this check was 2-3% of some profiles, demoted to -Xdev
-    if (isDeveloper) assert(sameLength(from, to), "Unsound substitution from "+ from +" to "+ to)
+  /** A base class to compute all substitutions. */
+  abstract class SubstMap[T >: Null](from0: List[Symbol], to0: List[T]) extends TypeMap {
+    private[this] var from: List[Symbol] = from0
+    private[this] var to: List[T]        = to0
 
     private[this] var fromHasTermSymbol = false
     private[this] var fromMin = Int.MaxValue
     private[this] var fromMax = Int.MinValue
     private[this] var fromSize = 0
-    from.foreach {
-      sym =>
-        fromMin = math.min(fromMin, sym.id)
-        fromMax = math.max(fromMax, sym.id)
-        fromSize += 1
-        if (sym.isTerm) fromHasTermSymbol = true
+
+    // So SubstTypeMap can expose them publicly
+    // while SubstMap can continue to access them as private fields
+    protected[this] final def accessFrom: List[Symbol] = from
+    protected[this] final def accessTo: List[T]        = to
+
+    reset(from0, to0)
+    def reset(from0: List[Symbol], to0: List[T]): this.type = {
+      // OPT this check was 2-3% of some profiles, demoted to -Xdev
+      if (isDeveloper) assert(sameLength(from, to), "Unsound substitution from "+ from +" to "+ to)
+
+      from = from0
+      to   = to0
+
+      fromHasTermSymbol = false
+      fromMin = Int.MaxValue
+      fromMax = Int.MinValue
+      fromSize = 0
+
+      def scanFrom(ss: List[Symbol]): Unit =
+        ss match {
+          case sym :: rest =>
+            fromMin = math.min(fromMin, sym.id)
+            fromMax = math.max(fromMax, sym.id)
+            fromSize += 1
+            if (sym.isTerm) fromHasTermSymbol = true
+            scanFrom(rest)
+          case _ => ()
+        }
+      scanFrom(from)
+      this
     }
 
     /** Are `sym` and `sym1` the same? Can be tuned by subclasses. */
@@ -760,8 +785,11 @@ private[internal] trait TypeMaps {
   }
 
   /** A map to implement the `substSym` method. */
-  class SubstSymMap(from: List[Symbol], to: List[Symbol]) extends SubstMap(from, to) {
+  class SubstSymMap(from0: List[Symbol], to0: List[Symbol]) extends SubstMap[Symbol](from0, to0) {
     def this(pairs: (Symbol, Symbol)*) = this(pairs.toList.map(_._1), pairs.toList.map(_._2))
+
+    private[this] final def from: List[Symbol] = accessFrom
+    private[this] final def to: List[Symbol]   = accessTo
 
     protected def toType(fromTpe: Type, sym: Symbol) = fromTpe match {
       case TypeRef(pre, _, args) => copyTypeRef(fromTpe, pre, sym, args)
@@ -821,9 +849,18 @@ private[internal] trait TypeMaps {
       mapTreeSymbols.transform(tree)
   }
 
+  object SubstSymMap {
+    def apply(): SubstSymMap = new SubstSymMap()
+    def apply(from: List[Symbol], to: List[Symbol]): SubstSymMap = new SubstSymMap(from, to)
+    def apply(fromto: (Symbol, Symbol)): SubstSymMap = new SubstSymMap(fromto)
+  }
+
   /** A map to implement the `subst` method. */
-  class SubstTypeMap(val from: List[Symbol], val to: List[Type]) extends SubstMap(from, to) {
-    protected def toType(fromtp: Type, tp: Type) = tp
+  class SubstTypeMap(from0: List[Symbol], to0: List[Type]) extends SubstMap[Type](from0, to0) {
+    final def from: List[Symbol] = accessFrom
+    final def to: List[Type]     = accessTo
+
+    override protected def toType(fromtp: Type, tp: Type) = tp
 
     override def mapOver(tree: Tree, giveup: () => Nothing): Tree = {
       object trans extends TypeMapTransformer {

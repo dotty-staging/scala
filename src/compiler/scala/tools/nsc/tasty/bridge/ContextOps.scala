@@ -13,12 +13,17 @@
 package scala.tools.nsc.tasty.bridge
 
 import scala.annotation.tailrec
+
+import scala.collection.mutable
 import scala.reflect.io.AbstractFile
+import scala.reflect.internal.MissingRequirementError
 
 import scala.tools.tasty.{TastyName, TastyFlags}, TastyFlags._, TastyName.ObjectName
 import scala.tools.nsc.tasty.{TastyUniverse, TastyModes, SafeEq}, TastyModes._
-import scala.reflect.internal.MissingRequirementError
-import scala.collection.mutable
+import scala.tools.nsc.tasty.{cyan, yellow, magenta, blue, green}
+
+import scala.util.chaining._
+
 
 /**This contains the definition for `Context`, along with standard error throwing capabilities with user friendly
  * formatted errors that can change their output depending on the context mode.
@@ -59,26 +64,32 @@ trait ContextOps { self: TastyUniverse =>
   }
 
   final def location(owner: Symbol): String = {
-    if (owner.isClass) s"${owner.kindString} ${owner.fullNameString}"
-    else s"${describeOwner(owner)} in ${location(owner.owner)}"
+    if (!isSymbol(owner))
+      "<NoSymbol>"
+    else if (owner.isClass || owner.isPackageClass || owner.isPackageObjectOrClass)
+      s"${owner.kindString} ${owner.fullNameString}"
+    else
+      s"${describeOwner(owner)} in ${location(owner.owner)}"
   }
 
   @inline final def typeError[T](msg: String): T = throw new u.TypeError(msg)
 
-  @inline final def assertError[T](msg: String): T =
-    throw new AssertionError(s"assertion failed: ${u.supplementErrorMessage(msg)}")
+  final def abortWith[T](msg: String): T = {
+    u.assert(false, msg)
+    ???
+  }
 
   @inline final def assert(assertion: Boolean, msg: => Any): Unit =
-    if (!assertion) assertError(String.valueOf(msg))
+    u.assert(assertion, msg)
 
   @inline final def assert(assertion: Boolean): Unit =
-    if (!assertion) assertError("")
+    u.assert(assertion, "")
 
   private final def findObject(owner: Symbol, name: u.Name): Symbol = {
     val scope =
       if (owner != null && owner.isClass) owner.rawInfo.decls
       else u.EmptyScope
-    val it = scope.lookupAll(name).filter(_.isModule)
+    val it = scope.lookupAll(name).withFilter(_.isModule)
     if (it.hasNext) it.next()
     else u.NoSymbol //throw new AssertionError(s"no module $name in ${location(owner)}")
   }
@@ -108,14 +119,49 @@ trait ContextOps { self: TastyUniverse =>
    * sealed child.
    */
   private def analyseAnnotations(sym: Symbol)(implicit ctx: Context): Unit = {
+
+    def lookupChild(childTpe: Type): Symbol = {
+      val child = symOfType(childTpe)
+      assert(isSymbol(child), s"did not find symbol of sealed child ${showType(childTpe)}")
+      if (child.isClass) {
+        child
+      }
+      else {
+        assert(child.isModule, s"sealed child was not class or object ${showSym(child)}")
+        child.moduleClass
+      }
+    }
+
     for (annot <- sym.annotations) {
       annot.completeInfo()
       if (annot.tpe.typeSymbolDirect === defn.ChildAnnot) {
-        val child = annot.tpe.typeArgs.head.typeSymbolDirect
-        sym.addChild(child)
+        val child = {
+          val child0 = lookupChild(annot.tpe.typeArgs.head)
+          if (child0 eq sym) {
+            // dotty represents a local sealed child of `C` with a child annotation
+            // that directly references `C`, this causes an infinite loop in
+            // `sealedDescendants`. See the tests:
+            // - test/tasty/neg/src-3/dottyi3149/dotty_i3149.scala
+            // - test/tasty/neg/src-2/Testdotty_i3149_fail.scala
+            // TODO [tasty] - fix assumption in compiler that sealed children cannot
+            // contain the parent class
+            ctx.newLocalSealedChildProxy(sym)
+          }
+          else {
+            child0
+          }
+        }
         ctx.log(s"adding sealed child ${showSym(child)} to ${showSym(sym)}")
+        sym.addChild(child)
       }
     }
+  }
+
+  final case class TraceInfo[-T](query: String, qual: String, res: T => String, modifiers: List[String] = Nil)
+
+  trait TraceFrame {
+    def parent: TraceFrame
+    def id: String
   }
 
   /**Maintains state through traversal of a TASTy file, such as the outer scope of the defintion being traversed, the
@@ -144,21 +190,50 @@ trait ContextOps { self: TastyUniverse =>
     final def globallyVisibleOwner: Symbol = owner.logicallyEnclosingMember
 
     final def ignoreAnnotations: Boolean = u.settings.YtastyNoAnnotations
-    final def verboseDebug: Boolean = u.settings.debug
 
     def requiresLatentEntry(decl: Symbol): Boolean = decl.isScala3Inline
-    def neverEntered(decl: Symbol): Boolean = decl.isPureMixinCtor
 
     def canEnterOverload(decl: Symbol): Boolean = {
       !(decl.isModule && isSymbol(findObject(thisCtx.owner, decl.name)))
     }
 
     final def log(str: => String): Unit = {
-      if (u.settings.YdebugTasty)
-        u.reporter.echo(
-          pos = u.NoPosition,
-          msg = str.linesIterator.map(line => s"#[$classRoot]: $line").mkString(System.lineSeparator)
+      if (u.settings.YdebugTasty) {
+        logImpl(str)
+      }
+    }
+
+    private final def logImpl(str: => String): Unit = u.reporter.echo(
+      pos = u.NoPosition,
+      msg = str
+              .linesIterator
+              .map(line => s"${blue(s"${showSymStable(classRoot)}:")} $line")
+              .mkString(System.lineSeparator)
+    )
+
+    @inline final def trace[T](info: => TraceInfo[T])(op: => T): T = {
+
+      def addInfo(i: TraceInfo[T], op: => T)(frame: TraceFrame): T = {
+        val id0 = frame.id
+        val modStr = (
+          if (i.modifiers.isEmpty) ""
+          else " " + green(i.modifiers.mkString("[", ",", "]"))
         )
+        logImpl(s"${yellow(id0)} ${cyan(s"<<< ${i.query}:")} ${magenta(i.qual)}$modStr")
+        op.tap(eval => logImpl(s"${yellow(id0)} ${cyan(s">>>")} ${magenta(i.res(eval))}$modStr"))
+      }
+
+      if (u.settings.YdebugTasty) initialContext.subTrace(addInfo(info, op))
+      else op
+    }
+
+    /** Trace only when `-Vdebug` is set
+     */
+    @inline final def traceV[T](info: => TraceInfo[T])(op: => T): T = {
+      if (u.settings.debug.value) {
+        trace(info)(op)
+      }
+      else op
     }
 
     def owner: Symbol
@@ -190,8 +265,40 @@ trait ContextOps { self: TastyUniverse =>
 
     final def newLocalDummy: Symbol = owner.newLocalDummy(u.NoPosition)
 
-    final def newWildcardSym(info: Type): Symbol =
-      owner.newTypeParameter(u.nme.WILDCARD.toTypeName, u.NoPosition, u.NoFlags).setInfo(info)
+    final def newWildcard(info: Type): Symbol =
+      owner.newTypeParameter(
+        name     = u.freshTypeName("_$")(u.currentFreshNameCreator),
+        pos      = u.NoPosition,
+        newFlags = FlagSets.Creation.Wildcard
+      ).setInfo(info)
+
+    final def newConstructor(owner: Symbol, info: Type): Symbol = unsafeNewSymbol(
+      owner = owner,
+      name  = TastyName.Constructor,
+      flags = Method,
+      info  = info
+    )
+
+    final def newLocalSealedChildProxy(cls: Symbol): Symbol = {
+      val tflags = Private | Local
+      unsafeNewClassSymbol(
+        owner = cls,
+        typeName = TastyName.SimpleName(cls.fullName('$') + "$$localSealedChildProxy").toTypeName,
+        flags = tflags,
+        info = defn.LocalSealedChildProxyInfo(cls, tflags),
+        privateWithin = u.NoSymbol
+      )
+    }
+
+    final def newLambdaParameter(tname: TastyName, flags: TastyFlagSet, idx: Int, infoDb: Int => Type): Symbol = {
+      val flags1 = flags | Param
+      unsafeNewSymbol(
+        owner = owner,
+        name  = tname,
+        flags = flags1,
+        info  = defn.LambdaParamInfo(flags1, idx, infoDb)
+      )
+    }
 
     final def findRootSymbol(roots: Set[Symbol], name: TastyName): Option[Symbol] = {
       import TastyName.TypeName
@@ -218,7 +325,8 @@ trait ContextOps { self: TastyUniverse =>
     final def newRefinementSymbol(parent: Type, owner: Symbol, name: TastyName, tpe: Type): Symbol = {
       val overridden = parent.member(encodeTastyName(name))
       val isOverride = isSymbol(overridden)
-      var flags      = if (isOverride && overridden.isType) Override else EmptyTastyFlags
+      var flags = EmptyTastyFlags
+      if (isOverride && overridden.isType) flags |= Override
       val info = {
         if (name.isTermName) {
           flags |= Method | Deferred
@@ -243,11 +351,11 @@ trait ContextOps { self: TastyUniverse =>
     /** Guards the creation of an object val by checking for an existing definition in the owner's scope
       */
     final def delayCompletion(owner: Symbol, name: TastyName, completer: TastyCompleter, privateWithin: Symbol = noSymbol): Symbol = {
-      def default() = unsafeNewSymbol(owner, name, completer.originalFlagSet, completer, privateWithin)
-      if (completer.originalFlagSet.is(Object)) {
+      def default() = unsafeNewSymbol(owner, name, completer.tflags, completer, privateWithin)
+      if (completer.tflags.is(Object)) {
         val sourceObject = findObject(owner, encodeTermName(name))
         if (isSymbol(sourceObject))
-          adjustSymbol(sourceObject, completer.originalFlagSet, completer, privateWithin)
+          redefineSymbol(sourceObject, completer.tflags, completer, privateWithin)
         else
           default()
       }
@@ -259,11 +367,11 @@ trait ContextOps { self: TastyUniverse =>
     /** Guards the creation of an object class by checking for an existing definition in the owner's scope
       */
     final def delayClassCompletion(owner: Symbol, typeName: TastyName.TypeName, completer: TastyCompleter, privateWithin: Symbol): Symbol = {
-      def default() = unsafeNewClassSymbol(owner, typeName, completer.originalFlagSet, completer, privateWithin)
-      if (completer.originalFlagSet.is(Object)) {
+      def default() = unsafeNewClassSymbol(owner, typeName, completer.tflags, completer, privateWithin)
+      if (completer.tflags.is(Object)) {
         val sourceObject = findObject(owner, encodeTermName(typeName.toTermName))
         if (isSymbol(sourceObject))
-          adjustSymbol(sourceObject.objectImplementation, completer.originalFlagSet, completer, privateWithin)
+          redefineSymbol(sourceObject.objectImplementation, completer.tflags, completer, privateWithin)
         else
           default()
       }
@@ -272,11 +380,18 @@ trait ContextOps { self: TastyUniverse =>
       }
     }
 
+    def evict(sym: Symbol): Unit = {
+      if (isSymbol(sym)) {
+        sym.owner.rawInfo.decls.unlink(sym)
+        sym.info = u.NoType
+      }
+    }
+
     final def enterIfUnseen(sym: Symbol): Unit = {
-      if (mode.is(IndexScopedStats))
-        initialContext.collectLatentEvidence(owner, sym)
       val decl = declaringSymbolOf(sym)
-      if (!(requiresLatentEntry(decl) || neverEntered(decl)))
+      if (mode.is(IndexScopedStats))
+        initialContext.collectLatentEvidence(owner, decl)
+      if (!requiresLatentEntry(decl))
         enterIfUnseen0(owner.rawInfo.decls, decl)
     }
 
@@ -293,84 +408,88 @@ trait ContextOps { self: TastyUniverse =>
 
     /** Unsafe to call for creation of a object val, prefer `delayCompletion` if info is a LazyType
       */
-    final def unsafeNewSymbol(owner: Symbol, name: TastyName, flags: TastyFlagSet, info: Type, privateWithin: Symbol = noSymbol): Symbol =
-      adjustSymbol(unsafeNewUntypedSymbol(owner, name, flags), info, privateWithin)
+    private def unsafeNewSymbol(owner: Symbol, name: TastyName, flags: TastyFlagSet, info: Type, privateWithin: Symbol = noSymbol): Symbol =
+      unsafeSetInfoAndPrivate(unsafeNewUntypedSymbol(owner, name, flags), info, privateWithin)
 
     /** Unsafe to call for creation of a object class, prefer `delayClassCompletion` if info is a LazyType
       */
-    final def unsafeNewClassSymbol(owner: Symbol, typeName: TastyName.TypeName, flags: TastyFlagSet, info: Type, privateWithin: Symbol): Symbol =
-      adjustSymbol(unsafeNewUntypedClassSymbol(owner, typeName, flags), info, privateWithin)
+    private def unsafeNewClassSymbol(owner: Symbol, typeName: TastyName.TypeName, flags: TastyFlagSet, info: Type, privateWithin: Symbol): Symbol =
+      unsafeSetInfoAndPrivate(unsafeNewUntypedClassSymbol(owner, typeName, flags), info, privateWithin)
 
     private final def unsafeNewUntypedSymbol(owner: Symbol, name: TastyName, flags: TastyFlagSet): Symbol = {
       if (flags.isOneOf(Param | ParamSetter)) {
         if (name.isTypeName) {
-          owner.newTypeParameter(encodeTypeName(name.toTypeName), u.NoPosition, encodeFlagSet(flags))
+          owner.newTypeParameter(encodeTypeName(name.toTypeName), u.NoPosition, newSymbolFlagSet(flags))
         }
         else {
-          if (owner.isClass && flags.is(FlagSets.FieldAccessorFlags)) {
-            val fieldFlags = flags &~ FlagSets.FieldAccessorFlags | FlagSets.LocalFieldFlags
+          if (owner.isClass && flags.is(FlagSets.FieldGetter)) {
+            val fieldFlags = flags &~ FlagSets.FieldGetter | FlagSets.LocalField
             val termName   = encodeTermName(name)
-            val getter     = owner.newMethodSymbol(termName, u.NoPosition, encodeFlagSet(flags))
-            val fieldSym   = owner.newValue(termName, u.NoPosition, encodeFlagSet(fieldFlags))
+            val getter     = owner.newMethodSymbol(termName, u.NoPosition, newSymbolFlagSet(flags))
+            val fieldSym   = owner.newValue(termName, u.NoPosition, newSymbolFlagSet(fieldFlags))
             fieldSym.info  = defn.CopyInfo(getter, fieldFlags)
             owner.rawInfo.decls.enter(fieldSym)
             getter
           }
           else {
-            owner.newValueParameter(encodeTermName(name), u.NoPosition, encodeFlagSet(flags))
+            owner.newValueParameter(encodeTermName(name), u.NoPosition, newSymbolFlagSet(flags))
           }
         }
       }
-      else if (name === TastyName.Constructor) {
-        owner.newConstructor(u.NoPosition, encodeFlagSet(flags &~ Stable))
-      }
-      else if (name === TastyName.MixinConstructor) {
-        owner.newMethodSymbol(u.nme.MIXIN_CONSTRUCTOR, u.NoPosition, encodeFlagSet(flags &~ Stable))
-      }
-      else if (flags.is(FlagSets.ObjectCreationFlags)) {
-        log(s"!!! visited module value $name first")
-        assert(!owner.rawInfo.decls.lookupAll(encodeTermName(name)).exists(_.isModule))
-        val module = owner.newModule(encodeTermName(name), u.NoPosition, encodeFlagSet(flags))
-        module.moduleClass.info = defn.DefaultInfo
+      else if (flags.is(FlagSets.Creation.ObjectDef)) {
+        val isEnum = flags.is(FlagSets.SingletonEnum)
+        if (!isEnum) {
+          log(s"!!! visited module value $name first")
+        }
+        val module = owner.newModule(encodeTermName(name), u.NoPosition, newSymbolFlagSet(flags))
+        module.moduleClass.info =
+          if (isEnum) defn.SingletonEnumClassInfo(module, flags)
+          else defn.DefaultInfo
         module
       }
       else if (name.isTypeName) {
-        owner.newTypeSymbol(encodeTypeName(name.toTypeName), u.NoPosition, encodeFlagSet(flags))
+        owner.newTypeSymbol(encodeTypeName(name.toTypeName), u.NoPosition, newSymbolFlagSet(flags))
+      }
+      else if (name === TastyName.Constructor) {
+        owner.newConstructor(u.NoPosition, newSymbolFlagSet(flags &~ Stable))
+      }
+      else if (name === TastyName.MixinConstructor) {
+        owner.newMethodSymbol(u.nme.MIXIN_CONSTRUCTOR, u.NoPosition, newSymbolFlagSet(flags &~ Stable))
       }
       else {
-        owner.newMethodSymbol(encodeTermName(name), u.NoPosition, encodeFlagSet(flags))
+        owner.newMethodSymbol(encodeTermName(name), u.NoPosition, newSymbolFlagSet(flags))
       }
     }
 
     private final def unsafeNewUntypedClassSymbol(owner: Symbol, typeName: TastyName.TypeName, flags: TastyFlagSet): Symbol = {
-      if (flags.is(FlagSets.ObjectClassCreationFlags)) {
+      if (flags.is(FlagSets.Creation.ObjectClassDef)) {
         log(s"!!! visited module class $typeName first")
-        val module = owner.newModule(encodeTermName(typeName), u.NoPosition, encodeFlagSet(FlagSets.ObjectCreationFlags))
+        val module = owner.newModule(encodeTermName(typeName), u.NoPosition, FlagSets.Creation.Default)
         module.info = defn.DefaultInfo
-        module.moduleClass.flags = encodeFlagSet(flags)
+        module.moduleClass.flags = newSymbolFlagSet(flags)
         module.moduleClass
       }
       else {
-        owner.newClassSymbol(encodeTypeName(typeName), u.NoPosition, encodeFlagSet(flags))
+        owner.newClassSymbol(encodeTypeName(typeName), u.NoPosition, newSymbolFlagSet(flags))
       }
     }
 
     final def enterClassCompletion(): Symbol = {
       val cls = globallyVisibleOwner.asClass
-      val assumedSelfType =
-        if (cls.is(Object) && cls.owner.isClass) defn.SingleType(cls.owner.thisType, cls.sourceModule)
-        else u.NoType
-      cls.info = u.ClassInfoType(cls.repr.parents, cls.repr.decls, assumedSelfType.typeSymbolDirect)
+      val assumedSelfSym = {
+        if (cls.is(Object) && cls.owner.isClass) {
+          cls.sourceModule
+        }
+        else {
+          u.NoSymbol
+        }
+      }
+      cls.info = u.ClassInfoType(cls.repr.parents, cls.repr.decls, assumedSelfSym)
       cls
     }
 
-    /** Normalises the parents and sets up value class machinery */
-    final def adjustParents(cls: Symbol, parents: List[Type]): List[Type] = {
-      val parentTypes = parents.map { tp =>
-        val tpe = tp.dealias
-        if (tpe.typeSymbolDirect === u.definitions.ObjectClass) u.definitions.AnyRefTpe
-        else tpe
-      }
+    /** sets up value class machinery */
+    final def processParents(cls: Symbol, parentTypes: List[Type]): parentTypes.type = {
       if (parentTypes.head.typeSymbolDirect === u.definitions.AnyValClass) {
         // TODO [tasty]: please reconsider if there is some shared optimised logic that can be triggered instead.
         withPhaseNoLater("extmethods") { ctx0 =>
@@ -388,16 +507,29 @@ trait ContextOps { self: TastyUniverse =>
       parentTypes
     }
 
-    final def removeFlags(symbol: Symbol, flags: TastyFlagSet): symbol.type =
-      symbol.resetFlag(encodeFlagSet(flags))
+    private[bridge] final def resetFlag0(symbol: Symbol, flags: u.FlagSet): symbol.type =
+      symbol.resetFlag(flags)
 
-    final def addFlags(symbol: Symbol, flags: TastyFlagSet): symbol.type =
-      symbol.setFlag(encodeFlagSet(flags))
+    final def completeEnumSingleton(sym: Symbol, tpe: Type): Unit = {
+      val moduleCls = sym.moduleClass
+      val moduleClsFlags = FlagSets.withAccess(
+        flags = FlagSets.Creation.ObjectClassDef,
+        inheritedAccess = sym.repr.tflags
+      )
+      val selfTpe = defn.SingleType(sym.owner.thisPrefix, sym)
+      val ctor = newConstructor(moduleCls, selfTpe)
+      moduleCls.typeOfThis = selfTpe
+      moduleCls.flags = newSymbolFlagSet(moduleClsFlags)
+      moduleCls.info = defn.ClassInfoType(intersectionParts(tpe), ctor :: Nil, moduleCls)
+      moduleCls.privateWithin = sym.privateWithin
+    }
 
-    final def adjustSymbol(symbol: Symbol, flags: TastyFlagSet, info: Type, privateWithin: Symbol): symbol.type =
-      adjustSymbol(addFlags(symbol, flags), info, privateWithin)
+    final def redefineSymbol(symbol: Symbol, flags: TastyFlagSet, completer: TastyCompleter, privateWithin: Symbol): symbol.type = {
+      symbol.flags = newSymbolFlagSet(flags)
+      unsafeSetInfoAndPrivate(symbol, completer, privateWithin)
+    }
 
-    final def adjustSymbol(symbol: Symbol, info: Type, privateWithin: Symbol): symbol.type = {
+    private def unsafeSetInfoAndPrivate(symbol: Symbol, info: Type, privateWithin: Symbol): symbol.type = {
       symbol.privateWithin = privateWithin
       symbol.info = info
       symbol
@@ -425,10 +557,13 @@ trait ContextOps { self: TastyUniverse =>
 
     final def newRefinementClassSymbol: Symbol = owner.newRefinementClass(u.NoPosition)
 
+    final def argumentCtx(fn: Tree): Context =
+      if (fn.symbol.isPrimaryConstructor) retractMode(ReadAnnotationCtor) else thisCtx
+
     final def setInfo(sym: Symbol, info: Type): Unit = sym.info = info
 
     final def markAsEnumSingleton(sym: Symbol): Unit =
-      sym.updateAttachment(new u.DottyEnumSingleton(sym.name.toString))
+      sym.updateAttachment(u.DottyEnumSingleton)
 
     final def markAsOpaqueType(sym: Symbol, alias: Type): Unit =
       sym.updateAttachment(new u.DottyOpaqueTypeAlias(alias))
@@ -480,6 +615,35 @@ trait ContextOps { self: TastyUniverse =>
     def mode: TastyMode = EmptyTastyMode
     def owner: Symbol = topLevelClass.owner
 
+    private class TraceFrameImpl(val worker: Int, val parent: TraceFrameImpl) extends TraceFrame {
+
+      var nextChild: Int = 0
+
+      val id: String = {
+        val buf = mutable.ArrayDeque.empty[Int]
+        var cur = this
+        while (cur.worker != -1) {
+          buf.prepend(cur.worker)
+          cur = cur.parent
+        }
+        buf.mkString("[", " ", ")")
+      }
+
+    }
+
+    private[this] var _trace: TraceFrameImpl = new TraceFrameImpl(worker = -1, parent = null)
+
+    private[ContextOps] def subTrace[T](op: TraceFrame => T): T = {
+      val parent = _trace
+      val child = new TraceFrameImpl(worker = parent.nextChild, parent)
+      _trace = child
+      try op(child)
+      finally {
+        parent.nextChild += 1
+        _trace = parent
+      }
+    }
+
     private[this] var mySymbolsToForceAnnots: mutable.LinkedHashSet[Symbol] = _
 
     private[ContextOps] def stageSymbolToForceAnnots(sym: Symbol): Unit = {
@@ -502,12 +666,19 @@ trait ContextOps { self: TastyUniverse =>
         val toForce = mySymbolsToForceAnnots.toList
         mySymbolsToForceAnnots.clear()
         for (sym <- toForce) {
-          log(s"!!! forcing annotations on ${showSym(sym)}")
-          analyseAnnotations(sym)
+          trace(traceForceAnnotations(sym)) {
+            analyseAnnotations(sym)
+          }
         }
         assert(mySymbolsToForceAnnots.isEmpty, "more symbols added while forcing")
       }
     }
+
+    private def traceForceAnnotations(sym: Symbol) = TraceInfo[Unit](
+      query = "forcing annotations of symbol",
+      qual = s"${showSym(sym)}",
+      res = _ => s"annotations were forced on ${showSym(sym)}"
+    )
 
     private[this] var myInlineDefs: mutable.Map[Symbol, mutable.ArrayBuffer[Symbol]] = null
     private[this] var myMacros: mutable.Map[Symbol, mutable.ArrayBuffer[Symbol]] = null
@@ -548,7 +719,7 @@ trait ContextOps { self: TastyUniverse =>
      * Reports illegal definitions:
      *   - trait constructors with parameters
      *
-     *  @param cls should be a symbol associated with a non-empty scope
+     *  @param cls should be a class symbol associated with a non-empty scope
      */
     private[ContextOps] def enterLatentDefs(cls: Symbol): Unit = {
 

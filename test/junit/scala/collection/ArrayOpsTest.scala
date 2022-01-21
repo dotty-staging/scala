@@ -122,4 +122,36 @@ class ArrayOpsTest {
     val a: Array[Byte] = new Array[Byte](1000).sortWith { _ < _ }
     assertEquals(0, a(0))
   }
+
+  @Test
+  def `empty intersection has correct component type for array`(): Unit = {
+    val something = Array(3.14)
+    val nothing   = Array[Double]()
+    val empty     = Array.empty[Double]
+
+    assertEquals(classOf[Double], nothing.intersect(something).getClass.getComponentType)
+    assertTrue(nothing.intersect(something).isEmpty)
+
+    assertEquals(classOf[Double], empty.intersect(something).getClass.getComponentType)
+    assertTrue(empty.intersect(something).isEmpty)
+    assertEquals(classOf[Double], empty.intersect(nothing).getClass.getComponentType)
+    assertTrue(empty.intersect(nothing).isEmpty)
+
+    assertEquals(classOf[Double], something.intersect(nothing).getClass.getComponentType)
+    assertTrue(something.intersect(nothing).isEmpty)
+    assertEquals(classOf[Double], something.intersect(empty).getClass.getComponentType)
+    assertTrue(something.intersect(empty).isEmpty)
+  }
+
+  // discovered while working on scala/scala#9388
+  @Test
+  def iterator_drop(): Unit = {
+    val it = Array(1, 2, 3)
+      .iterator
+      .drop(Int.MaxValue)
+      .drop(Int.MaxValue)  // potential index overflow to negative
+    assert(!it.hasNext)    // bug had index as negative and this returning true
+                           // even though the index is both out of bounds and should
+                           // always be between `0` and `Array#length`.
+  }
 }

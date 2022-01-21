@@ -91,9 +91,9 @@ abstract class BTypesFromSymbols[G <: Global](val global: G) extends BTypes {
 
     assert(classSym != NoSymbol, "Cannot create ClassBType from NoSymbol")
     assert(classSym.isClass, s"Cannot create ClassBType from non-class symbol $classSym")
-    if (global.settings.debug) {
-      // OPT these assertions have too much performance overhead to run unconditionally
-      assertClassNotArrayNotPrimitive(classSym)
+    // note: classSym can be scala.Array, see https://github.com/scala/bug/issues/12225#issuecomment-729687859
+    if (global.settings.isDebug) {
+      // OPT this assertion has too much performance overhead to run unconditionally
       assert(!primitiveTypeToBType.contains(classSym) || isCompilingPrimitive, s"Cannot create ClassBType for primitive class symbol $classSym")
     }
 
@@ -138,8 +138,15 @@ abstract class BTypesFromSymbols[G <: Global](val global: G) extends BTypes {
   }
 
   def bootstrapMethodArg(t: Constant, pos: Position): AnyRef = t match {
-    case Constant(mt: Type) => methodBTypeFromMethodType(transformedType(mt), isConstructor = false).toASMType
-    case c @ Constant(sym: Symbol) => staticHandleFromSymbol(sym)
+    case Constant(mt: Type) =>
+      transformedType(mt) match {
+        case mt1: MethodType =>
+          methodBTypeFromMethodType(mt1, isConstructor = false).toASMType
+        case t =>
+          typeToBType(t).toASMType
+      }
+    case c @ Constant(sym: Symbol) if sym.owner.isJavaDefined && sym.isStaticMember => staticHandleFromSymbol(sym)
+    case c @ Constant(sym: Symbol) => handleFromMethodSymbol(sym)
     case c @ Constant(value: String) => value
     case c @ Constant(value) if c.isNonUnitAnyVal => c.value.asInstanceOf[AnyRef]
     case _ => reporter.error(pos, "Unable to convert static argument of ApplyDynamic into a classfile constant: " + t); null
@@ -155,6 +162,23 @@ abstract class BTypesFromSymbols[G <: Global](val global: G) extends BTypes {
     val ownerInternalName = if (mustUseMirrorClass) rawInternalName stripSuffix nme.MODULE_SUFFIX_STRING else rawInternalName
     val isInterface = sym.owner.linkedClassOfClass.isTraitOrInterface
     new asm.Handle(asm.Opcodes.H_INVOKESTATIC, ownerInternalName, sym.name.encoded, descriptor, isInterface)
+  }
+
+  def handleFromMethodSymbol(sym: Symbol): asm.Handle = {
+    val isConstructor = (sym.isClassConstructor)
+    val descriptor = methodBTypeFromMethodType(sym.info, isConstructor).descriptor
+    val ownerBType = classBTypeFromSymbol(sym.owner)
+    val rawInternalName = ownerBType.internalName
+    val ownerInternalName = rawInternalName
+    val isInterface = sym.owner.isTraitOrInterface
+    val tag =
+              if (sym.isStaticMember) {
+                if (sym.owner.isJavaDefined) throw new UnsupportedOperationException("handled by staticHandleFromSymbol")
+                else asm.Opcodes.H_INVOKESTATIC
+              } else if (isConstructor) asm.Opcodes.H_NEWINVOKESPECIAL
+              else if (isInterface) asm.Opcodes.H_INVOKEINTERFACE
+              else asm.Opcodes.H_INVOKEVIRTUAL
+    new asm.Handle(tag, ownerInternalName, if (isConstructor) sym.name.toString else sym.name.encoded, descriptor, isInterface)
   }
 
   /**
@@ -219,11 +243,6 @@ abstract class BTypesFromSymbols[G <: Global](val global: G) extends BTypes {
   def assertClassNotArray(sym: Symbol): Unit = {
     assert(sym.isClass, sym)
     assert(sym != definitions.ArrayClass || isCompilingArray, sym)
-  }
-
-  def assertClassNotArrayNotPrimitive(sym: Symbol): Unit = {
-    assertClassNotArray(sym)
-    assert(!primitiveTypeToBType.contains(sym) || isCompilingPrimitive, sym)
   }
 
   def implementedInterfaces(classSym: Symbol): List[Symbol] = {

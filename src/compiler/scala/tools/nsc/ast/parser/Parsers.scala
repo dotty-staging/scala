@@ -264,7 +264,7 @@ self =>
       if (syntaxErrors.isEmpty) firstTry
       else in.healBraces() match {
         case Nil      => showSyntaxErrors() ; firstTry
-        case patches  => (this withPatches patches).parse()
+        case patches  => withPatches(patches).parse()
       }
     }
   }
@@ -273,6 +273,14 @@ self =>
   final val Local: Location = 0
   final val InBlock: Location = 1
   final val InTemplate: Location = 2
+
+  type ParamOwner = Int
+  object ParamOwner {
+    final val Class     = 0
+    final val Type      = 1
+    final val TypeParam = 2  // unused
+    final val Def       = 3
+  }
 
   // These symbols may not yet be loaded (e.g. in the ide) so don't go
   // through definitions to obtain the names.
@@ -305,25 +313,6 @@ self =>
         in.sepRegions = seps
         in.copyFrom(saved)
       }
-    }
-
-    /** Perform an operation while peeking ahead.
-     *  Pushback if the operation yields an empty tree or blows to pieces.
-     */
-    @inline def peekingAhead(tree: => Tree): Tree = {
-      @inline def peekahead() = {
-        in.prev copyFrom in
-        in.nextToken()
-      }
-      @inline def pushback() = {
-        in.next copyFrom in
-        in copyFrom in.prev
-      }
-      peekahead()
-      // try it, in case it is recoverable
-      val res = try tree catch { case e: Exception => pushback() ; throw e }
-      if (res.isEmpty) pushback()
-      res
     }
 
     class ParserTreeBuilder extends TreeBuilder {
@@ -674,6 +663,24 @@ self =>
       case _ => false
     }
 
+    def isSoftModifier: Boolean =
+      currentRun.isScala3 && in.token == IDENTIFIER && softModifierNames.contains(in.name)
+
+    /** Is the current token a soft modifier in a position where such a modifier is allowed? */
+    def isValidSoftModifier: Boolean =
+      isSoftModifier && {
+        val mod = in.name
+        lookingAhead {
+          while (in.token == NEWLINE || isModifier || isSoftModifier) in.nextToken()
+
+          in.token match {
+            case CLASS | CASECLASS => true
+            case DEF | TRAIT | TYPE => mod == nme.infix
+            case _ => false
+          }
+        }
+      }
+
     def isAnnotation: Boolean = in.token == AT
 
     def isLocalModifier: Boolean = in.token match {
@@ -705,6 +712,20 @@ self =>
     def isRawBar   = isRawIdent && in.name == raw.BAR
     def isRawIdent = in.token == IDENTIFIER
 
+    def isWildcardType = in.token == USCORE || isScala3WildcardType
+    def isScala3WildcardType = settings.isScala3 && isRawIdent && in.name == raw.QMARK
+    def checkQMarkUsage() =
+      if (!settings.isScala3 && isRawIdent && in.name == raw.QMARK)
+        deprecationWarning(in.offset,
+          "Wrap `?` in backticks to continue to use it as an identifier, or use `-Xsource:3` to use it as a wildcard like in Scala 3.", "2.13.6")
+    def checkQMarkDefinition() =
+      if (isRawIdent && in.name == raw.QMARK)
+        syntaxError(in.offset, "using `?` as a type name requires backticks.")
+    def checkKeywordDefinition() =
+      if (isRawIdent && scala3Keywords.contains(in.name))
+        deprecationWarning(in.offset,
+          s"Wrap `${in.name}` in backticks to use it as an identifier, it will become a keyword in Scala 3.", "2.13.7")
+
     def isIdent = in.token == IDENTIFIER || in.token == BACKQUOTED_IDENT
     def isMacro = in.token == IDENTIFIER && in.name == nme.MACROkw
 
@@ -715,12 +736,13 @@ self =>
     }
     def isLiteral = isLiteralToken(in.token)
 
-    def isExprIntroToken(token: Token): Boolean = isLiteralToken(token) || (token match {
-      case IDENTIFIER | BACKQUOTED_IDENT |
-           THIS | SUPER | IF | FOR | NEW | USCORE | TRY | WHILE |
-           DO | RETURN | THROW | LPAREN | LBRACE | XMLSTART => true
-      case _ => false
-    })
+    def isExprIntroToken(token: Token): Boolean =
+      !isValidSoftModifier && (isLiteralToken(token) || (token match {
+        case IDENTIFIER | BACKQUOTED_IDENT |
+             THIS | SUPER | IF | FOR | NEW | USCORE | TRY | WHILE |
+             DO | RETURN | THROW | LPAREN | LBRACE | XMLSTART => true
+        case _ => false
+      }))
 
     def isExprIntro: Boolean = isExprIntroToken(in.token)
 
@@ -918,6 +940,16 @@ self =>
         mkApply(Ident(op.encode), stripParens(left) :: arguments)
     }
 
+    /** Is current ident a `*`, and is it followed by a `)` or `, )`? */
+    def followingIsScala3Vararg(): Boolean =
+      currentRun.isScala3 && isRawStar && lookingAhead {
+        in.token == RPAREN ||
+        in.token == COMMA && {
+          in.nextToken()
+          in.token == RPAREN
+        }
+      }
+
     /* --------- OPERAND/OPERATOR STACK --------------------------------------- */
 
     /** Modes for infix types. */
@@ -952,14 +984,14 @@ self =>
       if (opinfo.targs.nonEmpty)
         syntaxError(opinfo.offset, "type application is not allowed for postfix operators")
 
-      val od = stripParens(reduceExprStack(base, opinfo.lhs))
-      makePostfixSelect(start, opinfo.offset, od, opinfo.operator)
+      val lhs = reduceExprStack(base, opinfo.lhs)
+      makePostfixSelect(if (lhs.pos.isDefined) lhs.pos.start else start, opinfo.offset, stripParens(lhs), opinfo.operator)
     }
 
     def finishBinaryOp(isExpr: Boolean, opinfo: OpInfo, rhs: Tree): Tree = {
       import opinfo._
       val operatorPos: Position = Position.range(rhs.pos.source, offset, offset, offset + operator.length)
-      val pos                   = lhs.pos union rhs.pos union operatorPos withPoint offset
+      val pos                   = lhs.pos.union(rhs.pos).union(operatorPos).withEnd(in.lastOffset).withPoint(offset)
 
       atPos(pos)(makeBinop(isExpr, lhs, operator, rhs, operatorPos, opinfo.targs))
     }
@@ -1023,13 +1055,14 @@ self =>
         else {
           ts foreach checkNotByNameOrVarargs
           val tuple = atPos(start) { makeSafeTupleType(ts) }
-          infixTypeRest(
+          val tpt = infixTypeRest(
             compoundTypeRest(
               annotTypeRest(
                 simpleTypeRest(
                   tuple))),
             InfixMode.FirstOp
           )
+          if (currentRun.isScala3) andType(tpt) else tpt
         }
       }
       private def makeExistentialTypeTree(t: Tree) = {
@@ -1105,11 +1138,22 @@ self =>
               }
               else
                 atPos(start)(makeSafeTupleType(inParens(types())))
-            case USCORE => wildcardType(in.skipToken())
             case _      =>
-              path(thisOK = false, typeOK = true) match {
-                case r @ SingletonTypeTree(_) => r
-                case r => convertToTypeId(r)
+              if (settings.isScala3 && (in.name == raw.PLUS || in.name == raw.MINUS) && lookingAhead(in.token == USCORE)) {
+                val start = in.offset
+                val identName = in.name.encode.append("_").toTypeName
+                in.nextToken()
+                in.nextToken()
+                atPos(start)(Ident(identName))
+              } else if (isWildcardType) {
+                val scala3Wildcard = isScala3WildcardType
+                wildcardType(in.skipToken(), scala3Wildcard)
+              } else {
+                checkQMarkUsage()
+                path(thisOK = false, typeOK = true) match {
+                  case r @ SingletonTypeTree(_) => r
+                  case r => convertToTypeId(r)
+                }
               }
           })
         }
@@ -1193,12 +1237,44 @@ self =>
         else t
       }
 
+      def andType(tpt: Tree): Tree = {
+        val parents = ListBuffer.empty[Tree]
+        var otherInfixOp: Tree = EmptyTree
+        def collect(tpt: Tree): Unit = tpt match {
+          case AppliedTypeTree(op @ Ident(tpnme.AND), List(left, right)) =>
+            collect(left)
+            collect(right)
+          case AppliedTypeTree(op, args) if args.exists(arg => arg.pos.start < op.pos.point) =>
+            otherInfixOp = op
+            parents += treeCopy.AppliedTypeTree(tpt, op, args.map(andType))
+          case _ =>
+            parents += tpt
+          }
+        collect(tpt)
+        if (parents.lengthCompare(1) > 0) {
+          if (!otherInfixOp.isEmpty) {
+            // TODO: Unlike Scala 3, we do not take precedence into account when
+            // parsing infix types, there's an unmerged PR that attempts to
+            // change that (#6147), but until that's merged we cannot accurately
+            // parse things like `A Map B & C`, so give up and emit an error
+            // rather than continuing with an incorrect parse tree.
+            syntaxError(otherInfixOp.pos.point,
+            s"Cannot parse infix type combining `&` and `$otherInfixOp`, please use `$otherInfixOp` as the head of a regular type application.")
+          }
+          atPos(tpt.pos.start)(CompoundTypeTree(Template(parents.toList, noSelfType, Nil)))
+        }
+        else
+          parents.head
+      }
+
       /** {{{
        *  InfixType ::= CompoundType {id [nl] CompoundType}
        *  }}}
        */
-      def infixType(mode: InfixMode.Value): Tree =
-        placeholderTypeBoundary { infixTypeRest(compoundType(), mode) }
+      def infixType(mode: InfixMode.Value): Tree = {
+        val tpt = placeholderTypeBoundary { infixTypeRest(compoundType(), mode) }
+        if (currentRun.isScala3) andType(tpt) else tpt
+      }
 
       /** {{{
        *  Types ::= Type {`,` Type}
@@ -1222,16 +1298,20 @@ self =>
     def rawIdent(): Name = try in.name finally in.nextToken()
 
     /** For when it's known already to be a type name. */
-    def identForType(): TypeName = ident().toTypeName
-    def identForType(skipIt: Boolean): TypeName = ident(skipIt).toTypeName
+    def identForType(): TypeName = identForType(skipIt = true)
+    def identForType(skipIt: Boolean): TypeName = {
+      checkQMarkDefinition()
+      ident(skipIt).toTypeName
+    }
 
     def identOrMacro(): Name = if (isMacro) rawIdent() else ident()
 
-    def selector(t: Tree): Tree = {
+    def selector(t0: Tree): Tree = {
+      val t = stripParens(t0)
       val point = if (isIdent) in.offset else in.lastOffset //scala/bug#8459
       //assert(t.pos.isDefined, t)
       if (t != EmptyTree)
-        Select(t, ident(skipIt = false)) setPos r2p(t.pos.start, point, in.lastOffset)
+        Select(t, ident(skipIt = false)) setPos r2p(t0.pos.start, point, in.lastOffset)
       else
         errorTermTree // has already been reported
     }
@@ -1353,8 +1433,7 @@ self =>
       else if (in.token == SYMBOLLIT) {
         def msg(what: String) =
           s"""symbol literal is $what; use Symbol("${in.strVal}") instead"""
-        if (settings.isScala3) syntaxError(in.offset, msg("unsupported"))
-        else deprecationWarning(in.offset, msg("deprecated"), "2.13.0")
+        deprecationWarning(in.offset, msg("deprecated"), "2.13.0")
         Apply(scalaDot(nme.Symbol), List(finish(in.strVal)))
       }
       else finish(in.token match {
@@ -1472,8 +1551,8 @@ self =>
      *  WildcardType ::= `_` TypeBounds
      *  }}}
      */
-    def wildcardType(start: Offset) = {
-      val pname = freshTypeName("_$")
+    def wildcardType(start: Offset, qmark: Boolean) = {
+      val pname = if (qmark) freshTypeName("?$") else freshTypeName("_$")
       val t = atPos(start)(Ident(pname))
       val bounds = typeBounds()
       val param = atPos(t.pos union bounds.pos) { makeSyntheticTypeParam(pname, bounds) }
@@ -1710,7 +1789,7 @@ self =>
       val base  = opstack
 
       @tailrec
-      def loop(top: Tree): Tree = if (!isIdent) top else {
+      def loop(top: Tree): Tree = if (!isIdent || followingIsScala3Vararg()) top else {
         pushOpInfo(reduceExprStack(base, top))
         newLineOptWhenFollowing(isExprIntroToken)
         if (isExprIntro)
@@ -1721,7 +1800,12 @@ self =>
         else finishPostfixOp(start, base, popOpInfo())
       }
 
-      reduceExprStack(base, loop(prefixExpr()))
+      val expr = reduceExprStack(base, loop(prefixExpr()))
+      if (followingIsScala3Vararg())
+        atPos(expr.pos.start) {
+          Typed(stripParens(expr), atPos(in.skipToken()) { Ident(tpnme.WILDCARD_STAR) })
+        }
+      else expr
     }
 
     /** {{{
@@ -1795,14 +1879,14 @@ self =>
       in.token match {
         case DOT =>
           in.nextToken()
-          simpleExprRest(selector(stripParens(t)), canApply = true)
+          simpleExprRest(selector(t), canApply = true)
         case LBRACKET =>
           val t1 = stripParens(t)
           t1 match {
             case Ident(_) | Select(_, _) | Apply(_, _) | Literal(_) =>
               var app: Tree = t1
               while (in.token == LBRACKET)
-                app = atPos(app.pos.start, in.offset)(TypeApply(app, exprTypeArgs()))
+                app = atPos(t.pos.start, in.offset)(TypeApply(app, exprTypeArgs()))
 
               simpleExprRest(app, canApply = true)
             case _ =>
@@ -1921,11 +2005,15 @@ self =>
     }
 
     /** {{{
-     *  Generator ::= Pattern1 (`<-` | `=`) Expr [Guard]
+     *  Generator ::= [`case`] Pattern1 (`<-` | `=`) Expr [Guard]
      *  }}}
      */
     def generator(eqOK: Boolean, allowNestedIf: Boolean = true): List[Tree] = {
       val start  = in.offset
+      val hasCase = in.token == CASE
+      if (hasCase)
+        in.skipCASE()
+
       val hasVal = in.token == VAL
       if (hasVal)
         in.nextToken()
@@ -1944,7 +2032,7 @@ self =>
         else syntaxError(in.offset, msg("unsupported", "just remove `val`"))
       }
 
-      if (hasEq && eqOK) in.nextToken()
+      if (hasEq && eqOK && !hasCase) in.nextToken()
       else accept(LARROW)
       val rhs = expr()
 
@@ -1976,17 +2064,18 @@ self =>
       final def functionArgType(): Tree = argType()
       final def argType(): Tree = {
         val start = in.offset
-        in.token match {
-          case USCORE =>
+        if (isWildcardType) {
+            val scala3Wildcard = isScala3WildcardType
             in.nextToken()
-            if (in.token == SUBTYPE || in.token == SUPERTYPE) wildcardType(start)
+            if (in.token == SUBTYPE || in.token == SUPERTYPE) wildcardType(start, scala3Wildcard)
             else atPos(start) { Bind(tpnme.WILDCARD, EmptyTree) }
-          case _ =>
-            typ() match {
-              case Ident(name: TypeName) if nme.isVariableName(name) =>
-                atPos(start) { Bind(name, EmptyTree) }
-              case t => t
-            }
+        } else {
+          checkQMarkUsage()
+          typ() match {
+            case Ident(name: TypeName) if nme.isVariableName(name) =>
+              atPos(start) { Bind(name, EmptyTree) }
+            case t => t
+          }
         }
       }
 
@@ -2071,13 +2160,19 @@ self =>
           case COMMA  => !isXML && in.isTrailingComma(RPAREN)
           case _      => false
         }
-        def checkWildStar: Tree = top match {
-          case Ident(nme.WILDCARD) if isSequenceOK && isRawStar => peekingAhead (
-            if (isCloseDelim) atPos(top.pos.start, in.prev.offset)(Star(stripParens(top)))
-            else EmptyTree
-          )
-          case _ => EmptyTree
-        }
+        def checkWildStar: Tree =
+          if (isSequenceOK) {
+            top match {
+              case Ident(nme.WILDCARD) if isRawStar && lookingAhead(isCloseDelim) =>
+                atPos(top.pos.start, in.skipToken()) { Star(top) }
+              case Ident(name) if followingIsScala3Vararg() =>
+                atPos(top.pos.start) {
+                  Bind(name, atPos(in.skipToken()) { Star(Ident(nme.WILDCARD)) })
+                }
+              case _ => EmptyTree
+            }
+          }
+          else EmptyTree
         @tailrec
         def loop(top: Tree): Tree = reducePatternStack(base, top) match {
           case next if isIdent && !isRawBar => pushOpInfo(next) ; loop(simplePattern(() => badPattern3()))
@@ -2255,8 +2350,11 @@ self =>
      */
     def accessModifierOpt(): Modifiers = normalizeModifiers {
       in.token match {
-        case m @ (PRIVATE | PROTECTED)  => in.nextToken() ; accessQualifierOpt(Modifiers(flagTokens(m)))
-        case _                          => NoMods
+        case m @ (PRIVATE | PROTECTED) =>
+          in.nextToken()
+          accessQualifierOpt(Modifiers(flagTokens(m)))
+        case _ =>
+          NoMods
       }
     }
 
@@ -2278,7 +2376,10 @@ self =>
           in.nextToken()
           loop(mods)
         case _ =>
-          mods
+          if (isValidSoftModifier) {
+            in.nextToken()
+            loop(mods)
+          } else mods
       }
       loop(NoMods)
     }
@@ -2362,14 +2463,7 @@ self =>
         if (vds.isEmpty)
           syntaxError(start, s"case classes must have a parameter list; try 'case class $name()' or 'case object $name'")
         else if (vds.head.nonEmpty && vds.head.head.mods.isImplicit) {
-          if (currentRun.isScala213)
-            syntaxError(start, s"case classes must have a non-implicit parameter list; try 'case class $name()$elliptical'")
-          else {
-            deprecationWarning(start, s"case classes should have a non-implicit parameter list; adapting to 'case class $name()$elliptical'", "2.12.2")
-            vds.insert(0, List.empty[ValDef])
-            vds(1) = vds(1).map(vd => copyValDef(vd)(mods = vd.mods & ~Flags.CASEACCESSOR))
-            if (implicitSection != -1) implicitSection += 1
-          }
+          syntaxError(start, s"case classes must have a non-implicit parameter list; try 'case class $name()$elliptical'")
         }
       }
       if (implicitSection != -1 && implicitSection != vds.length - 1)
@@ -2434,6 +2528,7 @@ self =>
         if (caseParam) mods |= Flags.CASEACCESSOR
       }
       val nameOffset = in.offset
+      checkKeywordDefinition()
       val name = ident()
       var bynamemod = 0L
       val tpt = {
@@ -2468,8 +2563,9 @@ self =>
      *  TypeParam             ::= Id TypeParamClauseOpt TypeBounds {`<%` Type} {`:` Type}
      *  }}}
      */
-    def typeParamClauseOpt(owner: Name, contextBoundBuf: ListBuffer[Tree]): List[TypeDef] = {
+    def typeParamClauseOpt(owner: Name, contextBoundBuf: ListBuffer[Tree], ownerKind: ParamOwner): List[TypeDef] = {
       def typeParam(ms: Modifiers): TypeDef = {
+        val isAbstractOwner = ownerKind == ParamOwner.Type //|| ownerKind == ParamOwner.TypeParam
         var mods = ms | Flags.PARAM
         val start = in.offset
         if (owner.isTypeName && isIdent) {
@@ -2482,10 +2578,18 @@ self =>
           }
         }
         val nameOffset = in.offset
-        // TODO AM: freshTermName(o2p(in.skipToken()), "_$$"), will need to update test suite
-        val pname: TypeName = wildcardOrIdent().toTypeName
+        checkQMarkDefinition()
+        checkKeywordDefinition()
+        val pname: TypeName =
+          if (in.token == USCORE && (isAbstractOwner || !currentRun.isScala3)) {
+            if (!isAbstractOwner)
+              deprecationWarning(in.offset, "Top-level wildcard is not allowed and will error under -Xsource:3", "2.13.7")
+            in.nextToken()
+            freshTypeName("_$$")
+          }
+          else ident(skipIt = false).toTypeName
         val param = atPos(start, nameOffset) {
-          val tparams = typeParamClauseOpt(pname, null) // @M TODO null --> no higher-order context bounds for now
+          val tparams = typeParamClauseOpt(pname, null, ParamOwner.Type) // @M TODO null --> no higher-order context bounds for now
           TypeDef(mods, pname, tparams, typeBounds())
         }
         if (contextBoundBuf ne null) {
@@ -2504,7 +2608,6 @@ self =>
         }
         param
       }
-      newLineOptWhenFollowedBy(LBRACKET)
       if (in.token == LBRACKET) inBrackets(commaSeparated(typeParam(NoMods withAnnotations annotations(skipNewLines = true))))
       else Nil
     }
@@ -2567,19 +2670,27 @@ self =>
       def loop(expr: Tree): Tree = {
         expr setPos expr.pos.makeTransparent
         val selectors: List[ImportSelector] = in.token match {
-          case USCORE   => List(wildImportSelector()) // import foo.bar._;
-          case LBRACE   => importSelectors()      // import foo.bar.{ x, y, z }
-          case _        =>
-            val nameOffset = in.offset
-            val name = ident()
-            if (in.token == DOT) {
-              // import foo.bar.ident.<unknown> and so create a select node and recurse.
-              val t = atPos(start, if (name == nme.ERROR) in.offset else nameOffset)(Select(expr, name))
-              in.nextToken()
-              return loop(t)
+          case USCORE =>
+            List(wildImportSelector()) // import foo.bar._
+          case IDENTIFIER if currentRun.isScala3 && in.name == raw.STAR =>
+            List(wildImportSelector()) // import foo.bar.*
+          case LBRACE =>
+            importSelectors()          // import foo.bar.{ x, y, z }
+          case _ =>
+            if (settings.isScala3 && lookingAhead { isRawIdent && in.name == nme.as })
+              List(importSelector())  // import foo.bar as baz
+            else {
+              val nameOffset = in.offset
+              val name = ident()
+              if (in.token == DOT) {
+                // import foo.bar.ident.<unknown> and so create a select node and recurse.
+                val t = atPos(start, if (name == nme.ERROR) in.offset else nameOffset)(Select(expr, name))
+                in.nextToken()
+                return loop(t)
+              }
+              // import foo.bar.Baz;
+              else List(makeImportSelector(name, nameOffset))
             }
-            // import foo.bar.Baz;
-            else List(makeImportSelector(name, nameOffset))
         }
         // reaching here means we're done walking.
         atPos(start)(Import(expr, selectors))
@@ -2603,15 +2714,23 @@ self =>
      *  }}}
      */
     def importSelectors(): List[ImportSelector] = {
-      val selectors = inBracesOrNil(commaSeparated(importSelector()))
+      val selectors0 = inBracesOrNil(commaSeparated(importSelector()))
+
+      // Treat an import of `*, given` or `given, *` as if it was an import of `*`
+      // since the former in Scala 3 has the same semantics as the latter in Scala 2.
+      val selectors =
+        if (currentRun.isScala3 && selectors0.exists(_.isWildcard))
+          selectors0.filterNot(sel => sel.name == nme.`given` && sel.rename == sel.name)
+        else
+          selectors0
+
       for (t <- selectors.init if t.isWildcard) syntaxError(t.namePos, "Wildcard import must be in last position")
       selectors
     }
 
-    def wildcardOrIdent() = {
-      if (in.token == USCORE) { in.nextToken() ; nme.WILDCARD }
+    def wildcardOrIdent() =
+      if (in.token == USCORE || settings.isScala3 && isRawStar) { in.nextToken() ; nme.WILDCARD }
       else ident()
-    }
 
     /** {{{
      *  ImportSelector ::= Id [`=>` Id | `=>` `_`]
@@ -2622,17 +2741,20 @@ self =>
       val bbq          = in.token == BACKQUOTED_IDENT
       val name         = wildcardOrIdent()
       var renameOffset = -1
-      val rename       = in.token match {
-        case ARROW =>
+
+      val rename =
+        if (in.token == ARROW || (settings.isScala3 && isRawIdent && in.name == nme.as)) {
           in.nextToken()
           renameOffset = in.offset
           if (name == nme.WILDCARD && !bbq) syntaxError(renameOffset, "Wildcard import cannot be renamed")
           wildcardOrIdent()
-        case _ if name == nme.WILDCARD && !bbq => null
-        case _     =>
+        }
+        else if (name == nme.WILDCARD && !bbq) null
+        else {
           renameOffset = start
           name
-      }
+        }
+
       ImportSelector(name, start, rename, renameOffset)
     }
 
@@ -2687,6 +2809,7 @@ self =>
     def patDefOrDcl(pos : Int, mods: Modifiers): List[Tree] = {
       var newmods = mods
       in.nextToken()
+      checkKeywordDefinition()
       val lhs = commaSeparated(stripParens(noSeq.pattern2()))
       val tp = typedOpt()
       val (rhs, rhsPos) =
@@ -2782,6 +2905,7 @@ self =>
       }
       else {
         val nameOffset = in.offset
+        checkKeywordDefinition()
         val name = identOrMacro()
         funDefRest(start, nameOffset, mods, name)
       }
@@ -2794,7 +2918,7 @@ self =>
         // [T : B] or [T : => B]; it contains the equivalent implicit parameter type,
         // i.e. (B[T] or T => B)
         val contextBoundBuf = new ListBuffer[Tree]
-        val tparams = typeParamClauseOpt(name, contextBoundBuf)
+        val tparams = typeParamClauseOpt(name, contextBoundBuf, ParamOwner.Def)
         val vparamss = paramClauses(name, contextBoundBuf.toList, ofCaseClass = false)
         newLineOptWhenFollowedBy(LBRACE)
         var restype = fromWithinReturnType(typedOpt())
@@ -2866,8 +2990,7 @@ self =>
           t = Apply(t, argumentExprs())
           newLineOptWhenFollowedBy(LBRACE)
         }
-        if (classContextBounds.isEmpty) t
-        else Apply(t, vparamss.last.map(vp => Ident(vp.name)))
+        t
       }
 
     /** {{{
@@ -2894,9 +3017,10 @@ self =>
       in.nextToken()
       newLinesOpt()
       atPos(start, in.offset) {
+        checkKeywordDefinition()
         val name = identForType()
         // @M! a type alias as well as an abstract type may declare type parameters
-        val tparams = typeParamClauseOpt(name, null)
+        val tparams = typeParamClauseOpt(name, null, ParamOwner.Type)
         in.token match {
           case EQUALS =>
             in.nextToken()
@@ -2954,13 +3078,17 @@ self =>
      *  }}}
      */
     def classDef(start: Offset, mods: Modifiers): ClassDef = {
+      def isAfterLineEnd: Boolean = in.lastOffset < in.lineStartOffset && (in.lineStartOffset <= in.offset || in.lastOffset < in.lastLineStartOffset && in.lastLineStartOffset <= in.offset)
       in.nextToken()
+      checkKeywordDefinition()
       val nameOffset = in.offset
       val name = identForType()
+      if (currentRun.isScala3 && in.token == LBRACKET && isAfterLineEnd)
+        deprecationWarning(in.offset, "type parameters should not follow newline", "2.13.7")
       atPos(start, if (name == tpnme.ERROR) start else nameOffset) {
         savingClassContextBounds {
           val contextBoundBuf = new ListBuffer[Tree]
-          val tparams = typeParamClauseOpt(name, contextBoundBuf)
+          val tparams = typeParamClauseOpt(name, contextBoundBuf, ParamOwner.Class)
           classContextBounds = contextBoundBuf.toList
           val tstart = (in.offset :: classContextBounds.map(_.pos.start)).min
           if (!classContextBounds.isEmpty && mods.isTrait) {
@@ -2990,6 +3118,7 @@ self =>
     def objectDef(start: Offset, mods: Modifiers, isPackageObject: Boolean = false): ModuleDef = {
       in.nextToken()
       val nameOffset = in.offset
+      checkKeywordDefinition()
       val name = ident()
       val tstart = in.offset
       atPos(start, if (name == nme.ERROR) start else nameOffset) {
@@ -3104,7 +3233,7 @@ self =>
         deprecationWarning(in.offset, "Using `<:` for `extends` is deprecated", since = "2.12.5")
         true
       }
-      val (parents, self, body) = (
+      val (parents, self, body) =
         if (in.token == EXTENDS || in.token == SUBTYPE && mods.isTrait && deprecatedUsage()) {
           in.nextToken()
           template()
@@ -3114,27 +3243,25 @@ self =>
           val (self, body) = templateBodyOpt(parenMeansSyntaxError = mods.isTrait || name.isTermName)
           (List(), self, body)
         }
-      )
-      def anyvalConstructor() = (
-        // Not a well-formed constructor, has to be finished later - see note
-        // regarding AnyVal constructor in AddInterfaces.
-        DefDef(NoMods, nme.CONSTRUCTOR, Nil, ListOfNil, TypeTree(), Block(Nil, literalUnit))
-      )
-      val parentPos = o2p(in.offset)
-      val tstart1 = if (body.isEmpty && in.lastOffset < tstart) in.lastOffset else tstart
+      // Not a well-formed constructor, has to be finished later - see note
+      // regarding AnyVal constructor in AddInterfaces.
+      def anyvalConstructor() = DefDef(NoMods, nme.CONSTRUCTOR, Nil, ListOfNil, TypeTree(), Block(Nil, literalUnit))
+      // tstart is the offset of the token after `class C[A]` (which may be LPAREN, EXTENDS, LBRACE).
+      // if there is no template body, then tstart may be in the next program element, so back up to just after the `class C[A]`.
+      val templateOffset = if (body.isEmpty && in.lastOffset < tstart) in.lastOffset else tstart
+      val templatePos = o2p(templateOffset)
 
-      // we can't easily check this later, because `gen.mkParents` adds the default AnyRef parent, and we need to warn based on what the user wrote
-      if (name == nme.PACKAGEkw && parents.nonEmpty && settings.isScala3)
-        deprecationWarning(tstart, s"package object inheritance is deprecated (https://github.com/scala/scala-dev/issues/441);\n" +
-                                   s"drop the `extends` clause or use a regular object instead", "3.0.0")
+      // warn now if user wrote parents for package object; `gen.mkParents` adds AnyRef to parents
+      if (currentRun.isScala3 && name == nme.PACKAGEkw && !parents.isEmpty)
+        deprecationWarning(tstart, """package object inheritance is deprecated (https://github.com/scala/scala-dev/issues/441);
+                                     |drop the `extends` clause or use a regular object instead""".stripMargin, "3.0.0")
 
-      atPos(tstart1) {
+      atPos(templateOffset) {
         // Exclude only the 9 primitives plus AnyVal.
         if (inScalaRootPackage && ScalaValueClassNames.contains(name))
           Template(parents, self, anyvalConstructor() :: body)
         else
-          gen.mkTemplate(gen.mkParents(mods, parents, parentPos),
-                         self, constrMods, vparamss, body, o2p(tstart))
+          gen.mkTemplate(gen.mkParents(mods, parents, templatePos), self, constrMods, vparamss, body, templatePos)
       }
     }
 
@@ -3208,7 +3335,7 @@ self =>
       case IMPORT =>
         in.flushDoc()
         importClause()
-      case _ if isAnnotation || isTemplateIntro || isModifier =>
+      case _ if isAnnotation || isTemplateIntro || isModifier || isValidSoftModifier =>
         joinComment(topLevelTmplDef :: Nil)
     }
 
@@ -3258,7 +3385,7 @@ self =>
       case IMPORT =>
         in.flushDoc()
         importClause()
-      case _ if isDefIntro || isModifier || isAnnotation =>
+      case _ if isDefIntro || isModifier || isAnnotation || isValidSoftModifier =>
         joinComment(nonLocalDefOrDcl)
       case _ if isExprIntro =>
         in.flushDoc()

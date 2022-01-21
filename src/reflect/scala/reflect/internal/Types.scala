@@ -16,13 +16,13 @@ package internal
 
 import java.util.Objects
 
-import scala.collection.{immutable, mutable}
+import scala.collection.mutable
 import scala.ref.WeakReference
 import mutable.{ListBuffer, LinkedHashSet}
 import Flags._
 import scala.util.control.ControlThrowable
 import scala.annotation.{tailrec, unused}
-import util.{Statistics, StatisticsStatics}
+import util.{ReusableInstance, Statistics}
 import util.ThreeValues._
 import Variance._
 import Depth._
@@ -98,7 +98,7 @@ trait Types
   import statistics._
 
   private[this] var explainSwitch = false
-  @unused private final val emptySymbolSet = immutable.Set.empty[Symbol]
+  @unused private final val emptySymbolSet = Set.empty[Symbol]
 
   @unused private final val breakCycles = settings.breakCycles.value
   /** In case anyone wants to turn on type parameter bounds being used
@@ -176,19 +176,7 @@ trait Types
    *  forwarded here. Some operations are rewrapped again.
    */
   trait RewrappingTypeProxy extends SimpleTypeProxy {
-    protected def maybeRewrap(newtp: Type) = (
-      if (newtp eq underlying) this
-      else {
-        // - BoundedWildcardTypes reach here during erroneous compilation: neg/t6258
-        // - Higher-kinded exclusion is because [x]CC[x] compares =:= to CC: pos/t3800
-        // - Avoid reusing the existing Wrapped(RefinedType) when we've be asked to wrap an =:= RefinementTypeRef, the
-        //   distinction is important in base type sequences. See TypesTest.testExistentialRefinement
-        // - Otherwise, if newtp =:= underlying, don't rewrap it.
-        val hasSpecialMeaningBeyond_=:= = newtp.isWildcard || newtp.isHigherKinded || newtp.isInstanceOf[RefinementTypeRef]
-        if (!hasSpecialMeaningBeyond_=:= && (newtp =:= underlying)) this
-        else rewrap(newtp)
-      }
-    )
+    protected def maybeRewrap(newtp: Type) = if (newtp eq underlying) this else rewrap(newtp)
     protected def rewrap(newtp: Type): Type
 
     // the following are all operations in class Type that are overridden in some subclass
@@ -692,7 +680,7 @@ trait Types
      *      = Int
      */
     def asSeenFrom(pre: Type, clazz: Symbol): Type = {
-      val start = if (StatisticsStatics.areSomeColdStatsEnabled) statistics.pushTimer(typeOpsStack, asSeenFromNanos)  else null
+      val start = if (settings.areStatisticsEnabled) statistics.pushTimer(typeOpsStack, asSeenFromNanos)  else null
       try {
         val trivial = (
              this.isTrivial
@@ -708,7 +696,7 @@ trait Types
           if (m.capturedSkolems.isEmpty) tp1
           else deriveType(m.capturedSkolems, _.cloneSymbol setFlag CAPTURED)(tp1)
         }
-      } finally if (StatisticsStatics.areSomeColdStatsEnabled) statistics.popTimer(typeOpsStack, start)
+      } finally if (settings.areStatisticsEnabled) statistics.popTimer(typeOpsStack, start)
     }
 
     /** The info of `sym`, seen as a member of this type.
@@ -754,7 +742,7 @@ trait Types
      */
     def substSym(from: List[Symbol], to: List[Symbol]): Type =
       if ((from eq to) || from.isEmpty) this
-      else new SubstSymMap(from, to) apply this
+      else SubstSymMap(from, to).apply(this)
 
     /** Substitute all occurrences of `ThisType(from)` in this type by `to`.
      *
@@ -814,7 +802,7 @@ trait Types
 
     /** Is this type a subtype of that type? */
     def <:<(that: Type): Boolean = {
-      if (StatisticsStatics.areSomeColdStatsEnabled) stat_<:<(that)
+      if (settings.areStatisticsEnabled) stat_<:<(that)
       else {
         (this eq that) ||
         (if (explainSwitch) explain("<:", isSubType(_: Type, _: Type), this, that)
@@ -836,7 +824,7 @@ trait Types
           case _                   => false
         }
       case TypeRef(_, sym, args) =>
-        val that1 = existentialAbstraction(args map (_.typeSymbol), that)
+        val that1 = existentialAbstraction(args.map(_.typeSymbol), that)
         (that ne that1) && (this <:< that1) && {
           debuglog(s"$this.matchesPattern($that) depended on discarding args and testing <:< $that1")
           true
@@ -846,26 +834,26 @@ trait Types
     })
 
     def stat_<:<(that: Type): Boolean = {
-      if (StatisticsStatics.areSomeColdStatsEnabled) statistics.incCounter(subtypeCount)
-      val start = if (StatisticsStatics.areSomeColdStatsEnabled) statistics.pushTimer(typeOpsStack, subtypeNanos) else null
+      if (settings.areStatisticsEnabled) statistics.incCounter(subtypeCount)
+      val start = if (settings.areStatisticsEnabled) statistics.pushTimer(typeOpsStack, subtypeNanos) else null
       val result =
         (this eq that) ||
         (if (explainSwitch) explain("<:", isSubType(_: Type, _: Type), this, that)
          else isSubType(this, that))
-      if (StatisticsStatics.areSomeColdStatsEnabled) statistics.popTimer(typeOpsStack, start)
+      if (settings.areStatisticsEnabled) statistics.popTimer(typeOpsStack, start)
       result
     }
 
     /** Is this type a weak subtype of that type? True also for numeric types, i.e. Int weak_<:< Long.
      */
     def weak_<:<(that: Type): Boolean = {
-      if (StatisticsStatics.areSomeColdStatsEnabled) statistics.incCounter(subtypeCount)
-      val start = if (StatisticsStatics.areSomeColdStatsEnabled) statistics.pushTimer(typeOpsStack, subtypeNanos) else null
+      if (settings.areStatisticsEnabled) statistics.incCounter(subtypeCount)
+      val start = if (settings.areStatisticsEnabled) statistics.pushTimer(typeOpsStack, subtypeNanos) else null
       val result =
         ((this eq that) ||
          (if (explainSwitch) explain("weak_<:", isWeakSubType, this, that)
           else isWeakSubType(this, that)))
-      if (StatisticsStatics.areSomeColdStatsEnabled) statistics.popTimer(typeOpsStack, start)
+      if (settings.areStatisticsEnabled) statistics.popTimer(typeOpsStack, start)
       result
     }
 
@@ -1411,7 +1399,7 @@ trait Types
     override def underlying: Type = sym.typeOfThis
     override def isHigherKinded = sym.isRefinementClass && underlying.isHigherKinded
     override def prefixString =
-      if (settings.debug) sym.nameString + ".this."
+      if (settings.isDebug) sym.nameString + ".this."
       else if (sym.isAnonOrRefinementClass) "this."
       else if (sym.isOmittablePrefix) ""
       else if (sym.isModuleClass) sym.fullNameString + "."
@@ -1571,18 +1559,16 @@ trait Types
     /** Bounds notation used in Scala syntax.
       * For example +This <: scala.collection.generic.Sorted[K,This].
       */
-    private[internal] def scalaNotation(typeString: Type => String): String = {
+    private[internal] def scalaNotation(typeString: Type => String): String =
       (if (emptyLowerBound) "" else " >: " + typeString(lo)) +
       (if (emptyUpperBound) "" else " <: " + typeString(hi))
-    }
     /** Bounds notation used in https://adriaanm.github.com/files/higher.pdf.
       * For example *(scala.collection.generic.Sorted[K,This]).
       */
-    private[internal] def starNotation(typeString: Type => String): String = {
+    private[internal] def starNotation(typeString: Type => String): String =
       if (emptyLowerBound && emptyUpperBound) ""
       else if (emptyLowerBound) s"(${typeString(hi)})"
       else s"(${typeString(lo)}, ${typeString(hi)})"
-    }
     override def kind = "TypeBoundsType"
     override def mapOver(map: TypeMap): Type = {
       val lo1 = map match {
@@ -1689,7 +1675,7 @@ trait Types
     override def isStructuralRefinement: Boolean =
       typeSymbol.isAnonOrRefinementClass && (decls exists symbolIsPossibleInRefinement)
 
-    protected def shouldForceScope = settings.debug || parents.isEmpty || !decls.isEmpty
+    protected def shouldForceScope = settings.isDebug || parents.isEmpty || !decls.isEmpty
     protected def initDecls        = fullyInitializeScope(decls)
     protected def scopeString      = if (shouldForceScope) initDecls.mkString("{", "; ", "}") else ""
     override def safeToString      = parentsString(parents) + scopeString
@@ -1760,8 +1746,8 @@ trait Types
 
           tpe.baseTypeSeqCache = tpWithoutTypeVars.baseTypeSeq lateMap paramToVar
         } else {
-          if (StatisticsStatics.areSomeColdStatsEnabled) statistics.incCounter(compoundBaseTypeSeqCount)
-          val start = if (StatisticsStatics.areSomeColdStatsEnabled) statistics.pushTimer(typeOpsStack, baseTypeSeqNanos) else null
+          if (settings.areStatisticsEnabled) statistics.incCounter(compoundBaseTypeSeqCount)
+          val start = if (settings.areStatisticsEnabled) statistics.pushTimer(typeOpsStack, baseTypeSeqNanos) else null
           try {
             tpe.baseTypeSeqCache = undetBaseTypeSeq
             tpe.baseTypeSeqCache =
@@ -1770,7 +1756,7 @@ trait Types
               else
                 compoundBaseTypeSeq(tpe)
           } finally {
-            if (StatisticsStatics.areSomeColdStatsEnabled) statistics.popTimer(typeOpsStack, start)
+            if (settings.areStatisticsEnabled) statistics.popTimer(typeOpsStack, start)
           }
           // [Martin] suppressing memoization solves the problem with "same type after erasure" errors
           // when compiling with
@@ -1793,13 +1779,13 @@ trait Types
     if (period != currentPeriod) {
       tpe.baseClassesPeriod = currentPeriod
       if (!isValidForBaseClasses(period)) {
-        val start = if (StatisticsStatics.areSomeColdStatsEnabled) statistics.pushTimer(typeOpsStack, baseClassesNanos) else null
+        val start = if (settings.areStatisticsEnabled) statistics.pushTimer(typeOpsStack, baseClassesNanos) else null
         try {
           tpe.baseClassesCache = null
           tpe.baseClassesCache = tpe.memo(computeBaseClasses(tpe))(tpe.typeSymbol :: _.baseClasses.tail)
         }
         finally {
-          if (StatisticsStatics.areSomeColdStatsEnabled) statistics.popTimer(typeOpsStack, start)
+          if (settings.areStatisticsEnabled) statistics.popTimer(typeOpsStack, start)
         }
       }
     }
@@ -1913,7 +1899,7 @@ trait Types
     private final val Initializing = 1
     private final val Initialized = 2
 
-    private type RefMap = Map[Symbol, immutable.Set[Symbol]]
+    private type RefMap = Map[Symbol, Set[Symbol]]
 
     /** All type parameters reachable from given type parameter
      *  by a path which contains at least one expansive reference.
@@ -2056,7 +2042,7 @@ trait Types
     /** A nicely formatted string with newlines and such.
      */
     def formattedToString = parents.mkString("\n        with ") + scopeString
-    override protected def shouldForceScope = settings.debug || decls.size > 1
+    override protected def shouldForceScope = settings.isDebug || decls.size > 1
     override protected def scopeString      = initDecls.mkString(" {\n  ", "\n  ", "\n}")
     override def safeToString               = if (shouldForceScope) formattedToString else super.safeToString
   }
@@ -2642,7 +2628,7 @@ trait Types
     }
     // ensure that symbol is not a local copy with a name coincidence
     private def needsPreString = (
-         settings.debug
+         settings.isDebug
       || !shorthands(sym.fullName)
       || (sym.ownersIterator exists (s => !s.isClass))
     )
@@ -2713,12 +2699,12 @@ trait Types
         case _                                         => ""
     }
     override def safeToString = {
-      val custom = if (settings.debug) "" else customToString
+      val custom = if (settings.isDebug) "" else customToString
       if (custom != "") custom
       else finishPrefix(preString + sym.nameString + argsString)
     }
     override def prefixString = "" + (
-      if (settings.debug)
+      if (settings.isDebug)
         super.prefixString
       else if (sym.isOmittablePrefix)
         ""
@@ -2796,13 +2782,13 @@ trait Types
     if (period != currentPeriod) {
       tpe.baseTypeSeqPeriod = currentPeriod
       if (!isValidForBaseClasses(period)) {
-        if (StatisticsStatics.areSomeColdStatsEnabled) statistics.incCounter(typerefBaseTypeSeqCount)
-        val start = if (StatisticsStatics.areSomeColdStatsEnabled) statistics.pushTimer(typeOpsStack, baseTypeSeqNanos) else null
+        if (settings.areStatisticsEnabled) statistics.incCounter(typerefBaseTypeSeqCount)
+        val start = if (settings.areStatisticsEnabled) statistics.pushTimer(typeOpsStack, baseTypeSeqNanos) else null
         try {
           tpe.baseTypeSeqCache = undetBaseTypeSeq
           tpe.baseTypeSeqCache = tpe.baseTypeSeqImpl
         } finally {
-          if (StatisticsStatics.areSomeColdStatsEnabled) statistics.popTimer(typeOpsStack, start)
+          if (settings.areStatisticsEnabled) statistics.popTimer(typeOpsStack, start)
         }
       }
     }
@@ -3152,7 +3138,7 @@ trait Types
     }
 
     override def nameAndArgsString: String = underlying match {
-      case TypeRef(_, sym, args) if !settings.debug && isRepresentableWithWildcards =>
+      case TypeRef(_, sym, args) if !settings.isDebug && isRepresentableWithWildcards =>
         sym.name.toString + wildcardArgsString(quantified.toSet, args).mkString("[", ",", "]")
       case TypeRef(_, sym, args) =>
         sym.name.toString + args.mkString("[", ",", "]") + existentialClauses
@@ -3192,7 +3178,7 @@ trait Types
     }
 
     override def safeToString: String = underlying match {
-      case TypeRef(pre, sym, args) if !settings.debug && isRepresentableWithWildcards =>
+      case TypeRef(pre, sym, args) if !settings.isDebug && isRepresentableWithWildcards =>
         val ref = typeRef(pre, sym, Nil).toString
         val wildcards = wildcardArgsString(quantified.toSet, args)
         if (wildcards.isEmpty) ref else ref + wildcards.mkString("[", ", ", "]")
@@ -3620,7 +3606,7 @@ trait Types
               // This is a higher-kinded type var with same arity as tp.
               // If so (see scala/bug#7517), side effect: adds the type constructor itself as a bound.
               isSubArgs(lhs, rhs, params, AnyDepth) && {addBound(tp.typeConstructor); true}
-            } else if (settings.isScala213 && numCaptured > 0) {
+            } else if (numCaptured > 0) {
               // Simple algorithm as suggested by Paul Chiusano in the comments on scala/bug#2712
               //
               //   https://github.com/scala/bug/issues/2712#issuecomment-292374655
@@ -4041,6 +4027,9 @@ trait Types
   def refinedType(parents: List[Type], owner: Symbol): Type =
     refinedType(parents, owner, newScope, owner.pos)
 
+  private[this] val copyRefinedTypeSSM: ReusableInstance[SubstSymMap] =
+    ReusableInstance[SubstSymMap](SubstSymMap(), enabled = isCompilerUniverse)
+
   def copyRefinedType(original: RefinedType, parents: List[Type], decls: Scope) =
     if ((parents eq original.parents) && (decls eq original.decls)) original
     else {
@@ -4055,9 +4044,10 @@ trait Types
         val syms2 = result.decls.toList
         val resultThis = result.typeSymbol.thisType
         val substThisMap = new SubstThisMap(original.typeSymbol, resultThis)
-        val substMap = new SubstSymMap(syms1, syms2)
-        for (sym <- syms2)
-          sym.modifyInfo(info => substMap.apply(substThisMap.apply(info)))
+        copyRefinedTypeSSM.using { (msm: SubstSymMap) =>
+          msm.reset(syms1, syms2)
+          syms2.foreach(_.modifyInfo(info => msm.apply(substThisMap.apply(info))))
+        }
       }
       result
     }
@@ -4294,14 +4284,14 @@ trait Types
          *  - closed: already in closure, and we already searched for new elements.
          *
          * Invariant: pending, closed, and border form a partition of `tparams`.
-         * Each element in tparams goes from pending to border, and from border to closed
+         * Each element in tparams goes from pending to border, and from border to closed.
          * We separate border from closed to avoid recomputing `Type.contains` for same elements.
          */
-        val pending = mutable.ListBuffer.empty[Symbol]
-        var border  = mutable.ListBuffer.empty[Symbol]
+        val pending = ListBuffer.empty[Symbol]
+        var border  = ListBuffer.empty[Symbol]
         partitionInto(tparams, tpe.contains, border, pending)
-        val closed    = mutable.ListBuffer.empty[Symbol]
-        var nextBorder = mutable.ListBuffer.empty[Symbol]
+        val closed     = ListBuffer.empty[Symbol]
+        var nextBorder = ListBuffer.empty[Symbol]
         while (!border.isEmpty) {
           nextBorder.clear()
           pending.filterInPlace { paramTodo =>
@@ -4318,15 +4308,15 @@ trait Types
         if (closed.length == tparams.length) tparams else closed.toList
     }
 
-    if (tparams.isEmpty || (tpe0 eq NoType) ) tpe0
+    if (tparams.isEmpty || (tpe0 eq NoType)) tpe0
     else {
-      val tpe      = normalizeAliases(tpe0)
+      val tpe           = normalizeAliases(tpe0)
       val extrapolation = new ExistentialExtrapolation(tparams)
       if (flipVariance) extrapolation.variance = Contravariant
-      val tpe1     = extrapolation extrapolate tpe
+      val tpe1          = extrapolation.extrapolate(tpe)
       newExistentialType(transitiveReferredFrom(tpe1), tpe1)
     }
-  }
+  } // end existentialAbstraction
 
 
 // Hash consing --------------------------------------------------------------
@@ -5039,8 +5029,8 @@ trait Types
     }
     if (!needsStripping) (ts, Nil) // fast path for common case
     else {
-      val tparams = mutable.ListBuffer[Symbol]()
-      val stripped = mutable.ListBuffer[Type]()
+      val tparams  = ListBuffer[Symbol]()
+      val stripped = ListBuffer[Type]()
       def stripType(tp: Type): Unit = tp match {
         case rt: RefinedType if isIntersectionTypeForLazyBaseType(rt) =>
           if (expandLazyBaseType)
@@ -5192,7 +5182,7 @@ trait Types
     def this(msg: String) = this(NoPosition, msg)
 
     final override def fillInStackTrace() =
-      if (settings.debug) super.fillInStackTrace() else this
+      if (settings.isDebug) super.fillInStackTrace() else this
   }
 
   // TODO: RecoverableCyclicReference should be separated from TypeError,
@@ -5200,7 +5190,7 @@ trait Types
   /** An exception for cyclic references from which we can recover */
   case class RecoverableCyclicReference(sym: Symbol)
     extends TypeError("illegal cyclic reference involving " + sym) {
-    if (settings.debug) printStackTrace()
+    if (settings.isDebug) printStackTrace()
   }
 
   class NoCommonType(tps: List[Type]) extends ControlThrowable(

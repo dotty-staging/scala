@@ -15,8 +15,9 @@ package collection
 package concurrent
 
 import java.util.concurrent.atomic._
-
+import scala.{unchecked => uc}
 import scala.annotation.tailrec
+import scala.collection.concurrent.TrieMap.RemovalPolicy
 import scala.collection.generic.DefaultSerializable
 import scala.collection.immutable.{List, Nil}
 import scala.collection.mutable.GrowableBuilder
@@ -114,13 +115,13 @@ private[collection] final class INode[K, V](bn: MainNode[K, V], g: Gen, equiv: E
         if ((bmp & flag) != 0) {
           // 1a) insert below
           cn.array(pos) match {
-            case in: INode[K, V] =>
+            case in: INode[K, V] @uc =>
               if (startgen eq in.gen) in.rec_insert(k, v, hc, lev + 5, this, startgen, ct)
               else {
                 if (GCAS(cn, cn.renewed(startgen, ct), ct)) rec_insert(k, v, hc, lev, parent, startgen, ct)
                 else false
               }
-            case sn: SNode[K, V] =>
+            case sn: SNode[K, V] @uc =>
               if (sn.hc == hc && equal(sn.k, k, ct)) GCAS(cn, cn.updatedAt(pos, new SNode(sn.k, v, hc), gen), ct)
               else {
                 val rn = if (cn.gen eq gen) cn else cn.renewed(gen, ct)
@@ -152,11 +153,12 @@ private[collection] final class INode[K, V](bn: MainNode[K, V], g: Gen, equiv: E
     *              KEY_ABSENT - key wasn't there, insert only, do not overwrite
     *              KEY_PRESENT - key was there, overwrite only, do not insert
     *              other value `v` - only overwrite if the current value is this
-    *  @param hc the hashcode of `k``
+   *   @param fullEquals whether to use reference or full equals when comparing `v` to the current value
+    *  @param hc the hashcode of `k`
     *
     *  @return     null if unsuccessful, Option[V] otherwise (indicating previous value bound to the key)
     */
-  @tailrec def rec_insertif(k: K, v: V, hc: Int, cond: AnyRef, lev: Int, parent: INode[K, V], startgen: Gen, ct: TrieMap[K, V]): Option[V] = {
+  @tailrec def rec_insertif(k: K, v: V, hc: Int, cond: AnyRef, fullEquals: Boolean, lev: Int, parent: INode[K, V], startgen: Gen, ct: TrieMap[K, V]): Option[V] = {
     val m = GCAS_READ(ct)  // use -Yinline!
 
     m match {
@@ -169,13 +171,13 @@ private[collection] final class INode[K, V](bn: MainNode[K, V], g: Gen, equiv: E
         if ((bmp & flag) != 0) {
           // 1a) insert below
           cn.array(pos) match {
-            case in: INode[K, V] =>
-              if (startgen eq in.gen) in.rec_insertif(k, v, hc, cond, lev + 5, this, startgen, ct)
+            case in: INode[K, V] @uc =>
+              if (startgen eq in.gen) in.rec_insertif(k, v, hc, cond, fullEquals, lev + 5, this, startgen, ct)
               else {
-                if (GCAS(cn, cn.renewed(startgen, ct), ct)) rec_insertif(k, v, hc, cond, lev, parent, startgen, ct)
+                if (GCAS(cn, cn.renewed(startgen, ct), ct)) rec_insertif(k, v, hc, cond, fullEquals, lev, parent, startgen, ct)
                 else null
               }
-            case sn: SNode[K, V] => cond match {
+            case sn: SNode[K, V] @uc => cond match {
               case INode.KEY_PRESENT_OR_ABSENT =>
                 if (sn.hc == hc && equal(sn.k, k, ct)) {
                   if (GCAS(cn, cn.updatedAt(pos, new SNode(sn.k, v, hc), gen), ct)) Some(sn.v) else null
@@ -198,7 +200,7 @@ private[collection] final class INode[K, V](bn: MainNode[K, V], g: Gen, equiv: E
                   if (GCAS(cn, cn.updatedAt(pos, new SNode(k, v, hc), gen), ct)) Some(sn.v) else null
                 } else None
               case otherv =>
-                if (sn.hc == hc && equal(sn.k, k, ct) && sn.v == otherv) {
+                if (sn.hc == hc && equal(sn.k, k, ct) && (if (fullEquals) sn.v == otherv else sn.v.asInstanceOf[AnyRef] eq otherv)) {
                   if (GCAS(cn, cn.updatedAt(pos, new SNode(k, v, hc), gen), ct)) Some(sn.v) else null
                 } else None
             }
@@ -236,7 +238,8 @@ private[collection] final class INode[K, V](bn: MainNode[K, V], g: Gen, equiv: E
             }
           case otherv =>
             ln.get(k) match {
-              case Some(v0) if v0 == otherv => if (insertln()) Some(otherv.asInstanceOf[V]) else null
+              case Some(v0) if (if (fullEquals) v0 == otherv else v0.asInstanceOf[AnyRef] eq otherv) =>
+                if (insertln()) Some(otherv.asInstanceOf[V]) else null
               case _ => None
             }
         }
@@ -264,19 +267,19 @@ private[collection] final class INode[K, V](bn: MainNode[K, V], g: Gen, equiv: E
           val pos = if (bmp == 0xffffffff) idx else Integer.bitCount(bmp & (flag - 1))
           val sub = cn.array(pos)
           sub match {
-            case in: INode[K, V] =>
+            case in: INode[K, V] @uc =>
               if (ct.isReadOnly || (startgen eq in.gen)) in.rec_lookup(k, hc, lev + 5, this, startgen, ct)
               else {
                 if (GCAS(cn, cn.renewed(startgen, ct), ct)) rec_lookup(k, hc, lev, parent, startgen, ct)
                 else RESTART
               }
-            case sn: SNode[K, V] => // 2) singleton node
+            case sn: SNode[K, V] @uc => // 2) singleton node
               if (sn.hc == hc && equal(sn.k, k, ct)) sn.v.asInstanceOf[AnyRef]
               else NO_SUCH_ELEMENT_SENTINEL
             case basicNode => throw new MatchError(basicNode)
           }
         }
-      case tn: TNode[K, V] => // 3) non-live node
+      case tn: TNode[_, _] => // 3) non-live node
         def cleanReadOnly(tn: TNode[K, V]) = if (ct.nonReadOnly) {
           clean(parent, ct, lev - 5)
           RESTART
@@ -295,15 +298,15 @@ private[collection] final class INode[K, V](bn: MainNode[K, V], g: Gen, equiv: E
     *
     *  @param hc            the hashcode of `k`
     *
-    *  @param removeAlways  if true, then the value will be removed regardless of the value
-    *                       if false, then value will only be removed if it exactly matches v`
+    * @param removalPolicy policy deciding whether to remove `k` based on `v` and the
+    *                       current value associated with `k` (Always, FullEquals, or ReferenceEq)
     *
     *  @return              null if not successful, an Option[V] indicating the previous value otherwise
     */
   def rec_remove(
     k: K,
     v: V,
-    removeAlways: Boolean,
+    removalPolicy: Int,
     hc: Int,
     lev: Int,
     parent: INode[K, V],
@@ -322,14 +325,14 @@ private[collection] final class INode[K, V](bn: MainNode[K, V], g: Gen, equiv: E
           val pos = Integer.bitCount(bmp & (flag - 1))
           val sub = cn.array(pos)
           val res = sub match {
-            case in: INode[K, V] =>
-              if (startgen eq in.gen) in.rec_remove(k, v, removeAlways, hc, lev + 5, this, startgen, ct)
+            case in: INode[K, V] @uc =>
+              if (startgen eq in.gen) in.rec_remove(k, v, removalPolicy, hc, lev + 5, this, startgen, ct)
               else {
-                if (GCAS(cn, cn.renewed(startgen, ct), ct)) rec_remove(k, v, removeAlways, hc, lev, parent, startgen, ct)
+                if (GCAS(cn, cn.renewed(startgen, ct), ct)) rec_remove(k, v, removalPolicy, hc, lev, parent, startgen, ct)
                 else null
               }
-            case sn: SNode[K, V] =>
-              if (sn.hc == hc && equal(sn.k, k, ct) && (removeAlways || sn.v == v)) {
+            case sn: SNode[K, V] @uc =>
+              if (sn.hc == hc && equal(sn.k, k, ct) && RemovalPolicy.shouldRemove(removalPolicy)(sn.v, v)) {
                 val ncn = cn.removedAt(pos, flag, gen).toContracted(lev)
                 if (GCAS(cn, ncn, ct)) Some(sn.v) else null
               } else None
@@ -349,8 +352,8 @@ private[collection] final class INode[K, V](bn: MainNode[K, V], g: Gen, equiv: E
                   else {
                     val pos = Integer.bitCount(bmp & (flag - 1))
                     val sub = cn.array(pos)
-                    if (sub eq this) (nonlive: @unchecked) match {
-                      case tn: TNode[K, V] =>
+                    if (sub eq this) (nonlive: @uc) match {
+                      case tn: TNode[K, V] @uc =>
                         val ncn = cn.updatedAt(pos, tn.copyUntombed, gen).toContracted(lev - 5)
                         if (!parent.GCAS(cn, ncn, ct))
                           if (ct.readRoot().gen == startgen) cleanParent(nonlive)
@@ -373,12 +376,12 @@ private[collection] final class INode[K, V](bn: MainNode[K, V], g: Gen, equiv: E
         clean(parent, ct, lev - 5)
         null
       case ln: LNode[K, V] =>
-        if (removeAlways) {
+        if (removalPolicy == RemovalPolicy.Always) {
           val optv = ln.get(k)
           val nn = ln.removed(k, ct)
           if (GCAS(ln, nn, ct)) optv else null
         } else ln.get(k) match {
-          case optv @ Some(v0) if v0 == v =>
+          case optv @ Some(v0) if RemovalPolicy.shouldRemove(removalPolicy)(v, v0) =>
             val nn = ln.removed(k, ct)
             if (GCAS(ln, nn, ct)) optv else null
           case _ => None
@@ -397,10 +400,11 @@ private[collection] final class INode[K, V](bn: MainNode[K, V], g: Gen, equiv: E
 
   def isNullInode(ct: TrieMap[K, V]) = GCAS_READ(ct) eq null
 
-  def cachedSize(ct: TrieMap[K, V]): Int = {
-    val m = GCAS_READ(ct)
-    m.cachedSize(ct)
-  }
+  def cachedSize(ct: TrieMap[K, V]): Int =
+    GCAS_READ(ct).cachedSize(ct)
+
+  def knownSize(ct: TrieMap[K, V]): Int =
+    GCAS_READ(ct).knownSize()
 
   /* this is a quiescent method! */
   def string(lev: Int) = "%sINode -> %s".format("  " * lev, mainnode match {
@@ -437,6 +441,8 @@ private[concurrent] final class FailedNode[K, V](p: MainNode[K, V]) extends Main
 
   def cachedSize(ct: AnyRef): Int = throw new UnsupportedOperationException
 
+  def knownSize: Int = throw new UnsupportedOperationException
+
   override def toString = "FailedNode(%s)".format(p)
 }
 
@@ -455,7 +461,7 @@ private[collection] final class SNode[K, V](final val k: K, final val v: V, fina
   def string(lev: Int) = ("  " * lev) + "SNode(%s, %s, %x)".format(k, v, hc)
 }
 
-
+// Tomb Node, used to ensure proper ordering during removals
 private[collection] final class TNode[K, V](final val k: K, final val v: V, final val hc: Int)
   extends MainNode[K, V] with KVNode[K, V] {
   def copy = new TNode(k, v, hc)
@@ -463,10 +469,11 @@ private[collection] final class TNode[K, V](final val k: K, final val v: V, fina
   def copyUntombed = new SNode(k, v, hc)
   def kvPair = (k, v)
   def cachedSize(ct: AnyRef): Int = 1
+  def knownSize: Int = 1
   def string(lev: Int) = ("  " * lev) + "TNode(%s, %s, %x, !)".format(k, v, hc)
 }
 
-
+// List Node, leaf node that handles hash collisions
 private[collection] final class LNode[K, V](val entries: List[(K, V)], equiv: Equiv[K])
   extends MainNode[K, V] {
 
@@ -491,7 +498,7 @@ private[collection] final class LNode[K, V](val entries: List[(K, V)], equiv: Eq
 
   def removed(k: K, ct: TrieMap[K, V]): MainNode[K, V] = {
     val updmap = entries.filterNot(entry => equiv.equiv(entry._1, k))
-    if (updmap.size > 1) new LNode(updmap, equiv)
+    if (updmap.sizeIs > 1) new LNode(updmap, equiv)
     else {
       val (k, v) = updmap.iterator.next()
       new TNode(k, v, ct.computeHash(k)) // create it tombed so that it gets compressed on subsequent accesses
@@ -502,14 +509,16 @@ private[collection] final class LNode[K, V](val entries: List[(K, V)], equiv: Eq
 
   def cachedSize(ct: AnyRef): Int = entries.size
 
+  def knownSize: Int = -1 // shouldn't ever be empty, and the size of a list is not known
+
   def string(lev: Int) = (" " * lev) + "LNode(%s)".format(entries.mkString(", "))
 
 }
 
-
+// Ctrie Node, contains bitmap and array of references to branch nodes
 private[collection] final class CNode[K, V](val bitmap: Int, val array: Array[BasicNode], val gen: Gen) extends CNodeBase[K, V] {
   // this should only be called from within read-only snapshots
-  def cachedSize(ct: AnyRef) = {
+  def cachedSize(ct: AnyRef): Int = {
     val currsz = READ_SIZE()
     if (currsz != -1) currsz
     else {
@@ -518,6 +527,8 @@ private[collection] final class CNode[K, V](val bitmap: Int, val array: Array[Ba
       READ_SIZE()
     }
   }
+
+  def knownSize: Int = READ_SIZE() // this should only ever return -1 if unknown
 
   // lends itself towards being parallelizable by choosing
   // a random starting offset in the array
@@ -535,9 +546,9 @@ private[collection] final class CNode[K, V](val bitmap: Int, val array: Array[Ba
     while (i < array.length) {
       val pos = (i + offset) % array.length
       array(pos) match {
-        case sn: SNode[_, _] => sz += 1
-        case in: INode[K, V] => sz += in.cachedSize(ct)
-        case basicNode       => throw new MatchError(basicNode)
+        case sn: SNode[_, _]     => sz += 1
+        case in: INode[K, V] @uc => sz += in.cachedSize(ct)
+        case basicNode           => throw new MatchError(basicNode)
       }
       i += 1
     }
@@ -581,8 +592,8 @@ private[collection] final class CNode[K, V](val bitmap: Int, val array: Array[Ba
     val narr = new Array[BasicNode](len)
     while (i < len) {
       arr(i) match {
-        case in: INode[K, V] => narr(i) = in.copyToGen(ngen, ct)
-        case bn: BasicNode => narr(i) = bn
+        case in: INode[K, V] @uc => narr(i) = in.copyToGen(ngen, ct)
+        case bn: BasicNode       => narr(i) = bn
       }
       i += 1
     }
@@ -595,7 +606,7 @@ private[collection] final class CNode[K, V](val bitmap: Int, val array: Array[Ba
   }
 
   def toContracted(lev: Int): MainNode[K, V] = if (array.length == 1 && lev > 0) array(0) match {
-    case sn: SNode[K, V] => sn.copyTombed
+    case sn: SNode[K, V] @uc => sn.copyTombed
     case _ => this
   } else this
 
@@ -613,11 +624,11 @@ private[collection] final class CNode[K, V](val bitmap: Int, val array: Array[Ba
     while (i < arr.length) { // construct new bitmap
       val sub = arr(i)
       sub match {
-        case in: INode[K, V] =>
+        case in: INode[K, V] @uc =>
           val inodemain = in.gcasRead(ct)
           assert(inodemain ne null)
           tmparray(i) = resurrect(in, inodemain)
-        case sn: SNode[K, V] =>
+        case sn: SNode[K, V] @uc =>
           tmparray(i) = sn
         case basicNode => throw new MatchError(basicNode)
       }
@@ -629,18 +640,15 @@ private[collection] final class CNode[K, V](val bitmap: Int, val array: Array[Ba
 
   def string(lev: Int): String = "CNode %x\n%s".format(bitmap, array.map(_.string(lev + 1)).mkString("\n"))
 
-  private def collectLocalElems: Seq[String] = array.flatMap({
-    case sn: SNode[K, V] => Iterable.single(sn.kvPair._2.toString)
-    case in: INode[K, V] => Iterable.single(scala.Predef.augmentString(in.toString).drop(14) + "(" + in.gen + ")")
-    case basicNode       => throw new MatchError(basicNode)
-  })
-
   override def toString = {
-    val elems = collectLocalElems
-    "CNode(sz: %d; %s)".format(elems.size, elems.sorted.mkString(", "))
+    def elems: Seq[String] = array.flatMap {
+      case sn: SNode[K, V] @uc => Iterable.single(sn.kvPair._2.toString)
+      case in: INode[K, V] @uc => Iterable.single(augmentString(in.toString).drop(14) + "(" + in.gen + ")")
+      case basicNode           => throw new MatchError(basicNode)
+    }
+    f"CNode(sz: ${elems.size}%d; ${elems.sorted.mkString(", ")})"
   }
 }
-
 
 private[concurrent] object CNode {
 
@@ -678,6 +686,7 @@ private[concurrent] case class RDCSS_Descriptor[K, V](old: INode[K, V], expected
   *
   *  For details, see: [[http://lampwww.epfl.ch/~prokopec/ctries-snapshot.pdf]]
   */
+@SerialVersionUID(-5212455458703321708L)
 final class TrieMap[K, V] private (r: AnyRef, rtupd: AtomicReferenceFieldUpdater[TrieMap[K, V], AnyRef], hashf: Hashing[K], ef: Equiv[K])
   extends scala.collection.mutable.AbstractMap[K, V]
     with scala.collection.concurrent.Map[K, V]
@@ -745,17 +754,17 @@ final class TrieMap[K, V] private (r: AnyRef, rtupd: AtomicReferenceFieldUpdater
   private[concurrent] def RDCSS_READ_ROOT(abort: Boolean = false): INode[K, V] = {
     val r = /*READ*/root
     r match {
-      case in: INode[K, V] => in
-      case desc: RDCSS_Descriptor[K, V] => RDCSS_Complete(abort)
-      case x                            => throw new MatchError(x)
+      case in: INode[K, V] @uc              => in
+      case desc: RDCSS_Descriptor[K, V] @uc => RDCSS_Complete(abort)
+      case x                                => throw new MatchError(x)
     }
   }
 
   @tailrec private def RDCSS_Complete(abort: Boolean): INode[K, V] = {
     val v = /*READ*/root
     v match {
-      case in: INode[K, V] => in
-      case desc: RDCSS_Descriptor[K, V] =>
+      case in: INode[K, V] @uc => in
+      case desc: RDCSS_Descriptor[K, V] @uc =>
         val RDCSS_Descriptor(ov, exp, nv) = desc
         if (abort) {
           if (CAS_ROOT(desc, ov)) ov
@@ -789,11 +798,11 @@ final class TrieMap[K, V] private (r: AnyRef, rtupd: AtomicReferenceFieldUpdater
     if (!r.rec_insert(k, v, hc, 0, null, r.gen, this)) inserthc(k, hc, v)
   }
 
-  @tailrec private def insertifhc(k: K, hc: Int, v: V, cond: AnyRef): Option[V] = {
+  @tailrec private def insertifhc(k: K, hc: Int, v: V, cond: AnyRef, fullEquals: Boolean): Option[V] = {
     val r = RDCSS_READ_ROOT()
 
-    val ret = r.rec_insertif(k, v, hc, cond, 0, null, r.gen, this)
-    if (ret eq null) insertifhc(k, hc, v, cond)
+    val ret = r.rec_insertif(k, v, hc, cond, fullEquals, 0, null, r.gen, this)
+    if (ret eq null) insertifhc(k, hc, v, cond, fullEquals)
     else ret
   }
 
@@ -815,15 +824,15 @@ final class TrieMap[K, V] private (r: AnyRef, rtupd: AtomicReferenceFieldUpdater
     *
     * @param k the key to remove
     * @param v the value compare with the value found associated with the key
-    * @param removeAlways if true, then `k` will be removed whether or not its value matches `v`
-    *                     if false, then `k` will ONLY be removed if its value matches `v`
+    * @param removalPolicy policy deciding whether to remove `k` based on `v` and the
+   *                       current value associated with `k` (Always, FullEquals, or ReferenceEq)
     * @return an Option[V] indicating the previous value
     */
-  @tailrec private def removehc(k: K, v: V, removeAlways: Boolean, hc: Int): Option[V] = {
+  @tailrec private def removehc(k: K, v: V, removalPolicy: Int, hc: Int): Option[V] = {
     val r = RDCSS_READ_ROOT()
-    val res = r.rec_remove(k, v, removeAlways, hc, 0, null, r.gen, this)
+    val res = r.rec_remove(k, v, removalPolicy, hc, 0, null, r.gen, this)
     if (res ne null) res
-    else removehc(k, v, removeAlways, hc)
+    else removehc(k, v, removalPolicy, hc)
   }
 
 
@@ -900,7 +909,7 @@ final class TrieMap[K, V] private (r: AnyRef, rtupd: AtomicReferenceFieldUpdater
 
   override def put(key: K, value: V): Option[V] = {
     val hc = computeHash(key)
-    insertifhc(key, hc, value, INode.KEY_PRESENT_OR_ABSENT)
+    insertifhc(key, hc, value, INode.KEY_PRESENT_OR_ABSENT, fullEquals = false /* unused */)
   }
 
   override def update(k: K, v: V): Unit = {
@@ -915,7 +924,7 @@ final class TrieMap[K, V] private (r: AnyRef, rtupd: AtomicReferenceFieldUpdater
 
   override def remove(k: K): Option[V] = {
     val hc = computeHash(k)
-    removehc(k = k, v = null.asInstanceOf[V], removeAlways = true, hc = hc)
+    removehc(k = k, v = null.asInstanceOf[V], RemovalPolicy.Always, hc = hc)
   }
 
   def subtractOne(k: K) = {
@@ -925,7 +934,7 @@ final class TrieMap[K, V] private (r: AnyRef, rtupd: AtomicReferenceFieldUpdater
 
   def putIfAbsent(k: K, v: V): Option[V] = {
     val hc = computeHash(k)
-    insertifhc(k, hc, v, INode.KEY_ABSENT)
+    insertifhc(k, hc, v, INode.KEY_ABSENT, fullEquals = false /* unused */)
   }
 
   // TODO once computeIfAbsent is added to concurrent.Map,
@@ -950,7 +959,7 @@ final class TrieMap[K, V] private (r: AnyRef, rtupd: AtomicReferenceFieldUpdater
     lookuphc(k, hc) match {
       case INodeBase.NO_SUCH_ELEMENT_SENTINEL =>
         val v = op
-        insertifhc(k, hc, v, INode.KEY_ABSENT) match {
+        insertifhc(k, hc, v, INode.KEY_ABSENT, fullEquals = false /* unused */) match {
           case Some(oldValue) => oldValue
           case None => v
         }
@@ -960,17 +969,27 @@ final class TrieMap[K, V] private (r: AnyRef, rtupd: AtomicReferenceFieldUpdater
 
   def remove(k: K, v: V): Boolean = {
     val hc = computeHash(k)
-    removehc(k, v, removeAlways = false, hc).nonEmpty
+    removehc(k, v, RemovalPolicy.FullEquals, hc).nonEmpty
+  }
+
+  override private[collection] def removeRefEq(k: K, v: V): Boolean = {
+    val hc = computeHash(k)
+    removehc(k, v, RemovalPolicy.ReferenceEq, hc).nonEmpty
   }
 
   def replace(k: K, oldvalue: V, newvalue: V): Boolean = {
     val hc = computeHash(k)
-    insertifhc(k, hc, newvalue, oldvalue.asInstanceOf[AnyRef]).nonEmpty
+    insertifhc(k, hc, newvalue, oldvalue.asInstanceOf[AnyRef], fullEquals = true).nonEmpty
+  }
+
+  override private[collection] def replaceRefEq(k: K, oldValue: V, newValue: V): Boolean = {
+    val hc = computeHash(k)
+    insertifhc(k, hc, newValue, oldValue.asInstanceOf[AnyRef], fullEquals = false).nonEmpty
   }
 
   def replace(k: K, v: V): Option[V] = {
     val hc = computeHash(k)
-    insertifhc(k, hc, v, INode.KEY_PRESENT)
+    insertifhc(k, hc, v, INode.KEY_PRESENT, fullEquals = false /* unused */)
   }
 
   def iterator: Iterator[(K, V)] = {
@@ -1004,16 +1023,14 @@ final class TrieMap[K, V] private (r: AnyRef, rtupd: AtomicReferenceFieldUpdater
   // END extra overrides
   ///////////////////////////////////////////////////////////////////
 
-
-  private def cachedSize() = {
-    val r = RDCSS_READ_ROOT()
-    r.cachedSize(this)
-  }
-
   override def size: Int =
     if (nonReadOnly) readOnlySnapshot().size
-    else cachedSize()
-  override def isEmpty: Boolean = size == 0
+    else RDCSS_READ_ROOT().cachedSize(this)
+  override def knownSize: Int =
+    if (nonReadOnly) -1
+    else RDCSS_READ_ROOT().knownSize(this)
+  override def isEmpty: Boolean =
+    (if (nonReadOnly) readOnlySnapshot() else this).sizeIs == 0 // sizeIs checks knownSize
   override protected[this] def className = "TrieMap"
 
 }
@@ -1033,6 +1050,19 @@ object TrieMap extends MapFactory[TrieMap] {
 
   class MangledHashing[K] extends Hashing[K] {
     def hash(k: K): Int = scala.util.hashing.byteswap32(k.##)
+  }
+
+  private[concurrent] object RemovalPolicy {
+    final val Always = 0
+    final val FullEquals = 1
+    final val ReferenceEq = 2
+
+    def shouldRemove[V](removalPolicy: Int)(a: V, b: V): Boolean =
+      removalPolicy match {
+        case Always      => true
+        case FullEquals  => a == b
+        case ReferenceEq => a.asInstanceOf[AnyRef] eq b.asInstanceOf[AnyRef]
+      }
   }
 }
 
@@ -1094,11 +1124,9 @@ private[collection] class TrieMapIterator[K, V](var level: Int, private var ct: 
     if (npos < stack(depth).length) {
       stackpos(depth) = npos
       stack(depth)(npos) match {
-        case sn: SNode[K, V] =>
-          current = sn
-        case in: INode[K, V] =>
-          readin(in)
-        case basicNode => throw new MatchError(basicNode)
+        case sn: SNode[K, V] @uc => current = sn
+        case in: INode[K, V] @uc => readin(in)
+        case basicNode           => throw new MatchError(basicNode)
       }
     } else {
       depth -= 1

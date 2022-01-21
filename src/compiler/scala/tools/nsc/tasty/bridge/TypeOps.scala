@@ -12,7 +12,7 @@
 
 package scala.tools.nsc.tasty.bridge
 
-import scala.tools.nsc.tasty.{TastyUniverse, SafeEq, TastyModes}, TastyModes._
+import scala.tools.nsc.tasty.{TastyUniverse, SafeEq, TastyModes, ForceKinds}, TastyModes._, ForceKinds._
 
 import scala.tools.tasty.{TastyName, ErasedTypeRef, TastyFlags}, TastyFlags._
 
@@ -20,6 +20,8 @@ import scala.reflect.internal.Variance
 import scala.util.chaining._
 
 import scala.collection.mutable
+import scala.collection.immutable.ArraySeq
+
 import scala.reflect.internal.Flags
 
 /**This layer adds factories that construct `scala.reflect` Types in the shapes that TASTy expects.
@@ -52,9 +54,70 @@ trait TypeOps { self: TastyUniverse =>
     }
   }
 
-  def lzyShow(tpe: Type): String = tpe match {
-    case u.TypeRef(_, sym, args) => s"$sym${if (args.nonEmpty) args.map(lzyShow).mkString("[", ",","]") else ""}"
-    case tpe                     => tpe.typeSymbolDirect.toString
+  def lzyShow(tpe: Type): String = {
+    val sym = symOfType(tpe)
+    if (isSymbol(sym)) {
+      val args = tpe.typeArgs
+      s"${sym.fullName}${if (args.nonEmpty) args.map(lzyShow).mkString("[", ",", "]") else ""}"
+    }
+    else {
+      s"${tpe.typeSymbolDirect.fullName}"
+    }
+  }
+
+  def showType(tpe: Type, wrap: Boolean = true): String = {
+    def prefixed(prefix: String)(op: => String) = {
+      val raw = op
+      if (wrap) s"""$prefix"$raw""""
+      else raw
+    }
+    def parameterised(tparams: List[Symbol], prefix: String)(f: String => String) = prefixed(prefix) {
+      f(if (tparams.isEmpty) "" else tparams.map(p => s"${p.name}").mkString("[", ", ", "]"))
+    }
+    def cls(tparams: List[Symbol], tpe: u.ClassInfoType) = parameterised(tparams, "cls") { paramStr =>
+      s"$paramStr${tpe.typeSymbol.fullName}$paramStr"
+    }
+    def meth(tparams: List[Symbol], tpe: u.MethodType) = parameterised(tparams, "meth") { paramStr =>
+      s"$paramStr$tpe"
+    }
+    def preStr(pre: Type): String = {
+      val preSym = symOfType(pre)
+      val thisStr = {
+        if (pre.isInstanceOf[u.ThisType] && !pre.typeSymbol.isPackageClass && !pre.typeSymbol.isModuleClass)
+          ".this"
+        else
+          ""
+      }
+      if (isSymbol(preSym)) s"${preSym.fullName}$thisStr." else ""
+    }
+    tpe match {
+      case tpe: u.ClassInfoType                      => cls(Nil, tpe)
+      case u.PolyType(tparams, tpe: u.ClassInfoType) => cls(tparams, tpe)
+      case u.PolyType(tparams, tpe: u.MethodType)    => meth(tparams, tpe)
+      case tpe: u.MethodType                         => meth(Nil, tpe)
+      case tpe: u.ThisType                           => prefixed("path") { s"${tpe.sym.fullName}.this" }
+
+      case tpe: u.SingleType =>
+        prefixed("path") {
+          if (tpe.sym.isModule) tpe.sym.fullName + ".type"
+          else s"${preStr(tpe.pre)}${tpe.sym.name}.type"
+        }
+
+      case tpe: u.TypeRef =>
+        if (tpe.sym.is(Object)) prefixed("path") {
+          s"${tpe.sym.fullName}.type"
+        }
+        else prefixed("tpelazy") {
+          val pre = preStr(tpe.pre)
+          val argsStrs = tpe.args.map(showType(_, wrap = false))
+          val argsStr = if (argsStrs.nonEmpty) argsStrs.mkString("[", ", ", "]") else ""
+          s"$pre${tpe.sym.name}$argsStr"
+        }
+
+      case tpe: u.TypeBounds => prefixed("tpebounds") { s"$tpe"}
+
+      case tpe => prefixed("tpe") { s"$tpe" }
+    }
   }
 
   def fnResult(fn: Type): Type = fn.dealiasWiden.finalResultType
@@ -92,17 +155,40 @@ trait TypeOps { self: TastyUniverse =>
     }
 
     final val NoType: Type = u.NoType
+    final val NoPrefix: Type = u.NoPrefix
+
+    def adjustParent(tp: Type): Type = {
+      val tpe = tp.dealias
+      if (tpe.typeSymbolDirect === u.definitions.ObjectClass) u.definitions.AnyRefTpe
+      else tpe
+    }
 
     /** Represents a symbol that has been initialised by TastyUnpickler, but can not be in a state of completion
      *  because its definition has not yet been seen.
      */
     object DefaultInfo extends TastyRepr {
       override def isTrivial: Boolean = true
-      def originalFlagSet: TastyFlagSet = EmptyTastyFlags
+      def tflags: TastyFlagSet = EmptyTastyFlags
     }
 
-    private[bridge] def CopyInfo(underlying: u.TermSymbol, originalFlagSet: TastyFlagSet): TastyRepr =
-      new CopyCompleter(underlying, originalFlagSet)
+    private[bridge] def CopyInfo(underlying: u.TermSymbol, tflags: TastyFlagSet)(implicit ctx: Context): TastyRepr =
+      new CopyCompleter(underlying, tflags)
+
+    private[bridge] def SingletonEnumClassInfo(
+        enumValue: u.TermSymbol,
+        originalFlagSet: TastyFlagSet
+    )(implicit ctx: Context): TastyRepr =
+      new SingletonEnumModuleClassCompleter(enumValue, originalFlagSet)
+
+    private[bridge] def LocalSealedChildProxyInfo(parent: Symbol, tflags: TastyFlagSet)(implicit ctx: Context): Type =
+      new LocalSealedChildProxyCompleter(parent, tflags)
+
+    private[bridge] def LambdaParamInfo(
+        tflags: TastyFlagSet,
+        idx: Int,
+        infoDb: Int => Type
+    )(implicit ctx: Context): Type =
+      new LambdaParamCompleter(tflags, idx, infoDb)
 
     def OpaqueTypeToBounds(tpe: Type): (Type, Type) = tpe match {
       case u.PolyType(tparams, tpe) =>
@@ -118,6 +204,7 @@ trait TypeOps { self: TastyUniverse =>
     }
     def ByNameType(arg: Type): Type = u.definitions.byNameType(arg)
     def TypeBounds(lo: Type, hi: Type): Type = u.TypeBounds.apply(lo, hi)
+    def InitialTypeInfo: Type = u.TypeBounds.empty
     def SingleType(pre: Type, sym: Symbol): Type = u.singleType(pre, sym)
     def ExprType(res: Type): Type = u.NullaryMethodType(res)
     def InlineExprType(res: Type): Type = res match {
@@ -127,7 +214,7 @@ trait TypeOps { self: TastyUniverse =>
     def PolyType(params: List[Symbol], res: Type): Type = u.PolyType(params, res)
     def ClassInfoType(parents: List[Type], clazz: Symbol): Type = u.ClassInfoType(parents, clazz.rawInfo.decls, clazz.asType)
     def ClassInfoType(parents: List[Type], decls: List[Symbol], clazz: Symbol): Type = u.ClassInfoType(parents, u.newScopeWith(decls:_*), clazz.asType)
-    def ThisType(sym: Symbol): Type = u.ThisType(sym)
+    def ThisType(tpe: Type): Type = u.ThisType(symOfType(tpe))
     def ConstantType(c: Constant): Type = u.ConstantType(c)
     def IntersectionType(tps: Type*): Type = u.intersectionType(tps.toList)
     def IntersectionType(tps: List[Type]): Type = u.intersectionType(tps)
@@ -140,6 +227,7 @@ trait TypeOps { self: TastyUniverse =>
     def SuperType(thisTpe: Type, superTpe: Type): Type = u.SuperType(thisTpe, superTpe)
     def LambdaFromParams(typeParams: List[Symbol], ret: Type): Type = u.PolyType(typeParams, lambdaResultType(ret))
     def RecType(run: RecType => Type)(implicit ctx: Context): Type = new RecType(run).parent
+    def RecThis(tpe: Type): Type = tpe.asInstanceOf[RecType].recThis
 
     /** The method type corresponding to given parameters and result type */
     def DefDefType(typeParams: List[Symbol], valueParamss: List[List[Symbol]], resultType: Type): Type = {
@@ -192,7 +280,7 @@ trait TypeOps { self: TastyUniverse =>
       if (args.exists(tpe => tpe.isInstanceOf[u.TypeBounds] | tpe.isInstanceOf[LambdaPolyType])) {
         val syms = mutable.ListBuffer.empty[Symbol]
         def bindWildcards(tpe: Type) = tpe match {
-          case tpe: u.TypeBounds   => ctx.newWildcardSym(tpe).tap(syms += _).pipe(_.ref)
+          case tpe: u.TypeBounds   => ctx.newWildcard(tpe).tap(syms += _).pipe(_.ref)
           case tpe: LambdaPolyType => tpe.toNested
           case tpe                 => tpe
         }
@@ -205,6 +293,64 @@ trait TypeOps { self: TastyUniverse =>
       }
 
     }
+
+    def ParamRef(binder: Type, idx: Int): Type =
+      binder.asInstanceOf[LambdaType].lambdaParams(idx).ref
+
+    def NamedType(prefix: Type, sym: Symbol): Type = {
+      if (sym.isType) {
+        prefix match {
+          case tp: u.ThisType if !sym.isTypeParameter => u.typeRef(prefix, sym, Nil)
+          case _:u.SingleType | _:u.RefinedType       => u.typeRef(prefix, sym, Nil)
+          case _                                      => u.appliedType(sym, Nil)
+        }
+      }
+      else { // is a term
+        if (sym.hasAllFlags(Flags.PackageFlags)) {
+          u.typeRef(u.NoPrefix, sym, Nil)
+        } else {
+          u.singleType(prefix, sym)
+        }
+      }
+    }
+
+    def TypeRef(prefix: Type, name: TastyName.TypeName)(implicit ctx: Context): Type =
+      TypeRefIn(prefix, prefix, name)
+
+    def TypeRefIn(prefix: Type, space: Type, name: TastyName.TypeName)(implicit ctx: Context): Type = {
+      import scala.tools.tasty.TastyName._
+
+      def doLookup = lookupTypeFrom(space)(prefix, name)
+
+      // we escape some types in the scala package especially
+      if (prefix.typeSymbol === u.definitions.ScalaPackage) {
+        name match {
+          case TypeName(SimpleName(raw @ SyntheticScala3Type())) => raw match {
+            case tpnme.And                                              => AndTpe
+            case tpnme.Or                                               => unionIsUnsupported
+            case tpnme.ContextFunctionN(n) if (n.toInt > 0)             => ContextFunctionType(n.toInt)
+            case tpnme.FunctionN(n)        if (n.toInt > 22)            => FunctionXXLType(n.toInt)
+            case tpnme.TupleCons                                        => genTupleIsUnsupported("scala.*:")
+            case tpnme.Tuple               if !ctx.mode.is(ReadParents) => genTupleIsUnsupported("scala.Tuple")
+            case tpnme.AnyKind                                          => u.definitions.AnyTpe
+            case tpnme.Matchable                                        => u.definitions.AnyTpe
+            case _                                                      => doLookup
+          }
+
+          case _ => doLookup
+        }
+      }
+      else {
+        doLookup
+      }
+    }
+
+    def TermRef(prefix: Type, name: TastyName)(implicit ctx: Context): Type =
+      TermRefIn(prefix, prefix, name)
+
+    def TermRefIn(prefix: Type, space: Type, name: TastyName)(implicit ctx: Context): Type =
+      lookupTypeFrom(space)(prefix, name.toTermName)
+
   }
 
   private[bridge] def mkRefinedTypeWith(parents: List[Type], clazz: Symbol, decls: u.Scope): Type =
@@ -240,9 +386,12 @@ trait TypeOps { self: TastyUniverse =>
       bounds
   }
 
+  private[bridge] def sameErasure(sym: Symbol)(tpe: Type, ref: ErasedTypeRef) =
+    NameErasure.sigName(tpe, sym) === ref
+
   /** This is a port from Dotty of transforming a Method type to an ErasedTypeRef
    */
-  private[bridge] object NameErasure {
+  private object NameErasure {
 
     def isRepeatedParam(self: Type): Boolean =
       self.typeSymbol eq u.definitions.RepeatedParamClass
@@ -251,9 +400,9 @@ trait TypeOps { self: TastyUniverse =>
      *  `from` and `to` must be static classes, both with one type parameter, and the same variance.
      *  Do the same for by name types => From[T] and => To[T]
      */
-    def translateParameterized(self: Type)(from: u.ClassSymbol, to: u.ClassSymbol, wildcardArg: Boolean = false)(implicit ctx: Context): Type = self match {
+    def translateParameterized(self: Type)(from: u.ClassSymbol, to: u.ClassSymbol, wildcardArg: Boolean): Type = self match {
       case self @ u.NullaryMethodType(tp) =>
-        u.NullaryMethodType(translateParameterized(tp)(from, to, wildcardArg=false))
+        u.NullaryMethodType(translateParameterized(tp)(from, to, wildcardArg = false))
       case _ =>
         if (self.typeSymbol.isSubClass(from)) {
           def elemType(tp: Type): Type = tp.dealiasWiden match {
@@ -263,28 +412,28 @@ trait TypeOps { self: TastyUniverse =>
           }
           val arg = elemType(self)
           val arg1 = if (wildcardArg) u.TypeBounds.upper(arg) else arg
-          to.ref(arg1 :: Nil)
+          u.appliedType(to, arg1 :: Nil)
         }
         else self
     }
 
-    def translateFromRepeated(self: Type)(toArray: Boolean, translateWildcard: Boolean = false)(implicit ctx: Context): Type = {
+    def translateFromRepeated(self: Type)(toArray: Boolean): Type = {
       val seqClass = if (toArray) u.definitions.ArrayClass else u.definitions.SeqClass
-      if (translateWildcard && self === u.WildcardType)
-        seqClass.ref(u.WildcardType :: Nil)
-      else if (isRepeatedParam(self))
+      if (isRepeatedParam(self))
         // We want `Array[? <: T]` because arrays aren't covariant until after
         // erasure. See `tests/pos/i5140`.
         translateParameterized(self)(u.definitions.RepeatedParamClass, seqClass, wildcardArg = toArray)
       else self
     }
 
-    def sigName(tp: Type, isJava: Boolean)(implicit ctx: Context): ErasedTypeRef = {
-      val normTp = translateFromRepeated(tp)(toArray = isJava)
-      erasedSigName(normTp.erasure)
+    def sigName(tp: Type, sym: Symbol): ErasedTypeRef = {
+      val normTp = translateFromRepeated(tp)(toArray = sym.isJavaDefined)
+      erasedSigName(
+        u.erasure.erasure(sym)(normTp)
+      )
     }
 
-    private def erasedSigName(erased: Type)(implicit ctx: Context): ErasedTypeRef = erased match {
+    private def erasedSigName(erased: Type): ErasedTypeRef = erased match {
       case erased: u.ExistentialType => erasedSigName(erased.underlying)
       case erased: u.TypeRef =>
         import TastyName._
@@ -348,56 +497,71 @@ trait TypeOps { self: TastyUniverse =>
   private val SyntheticScala3Type =
     raw"^(?:&|\||AnyKind|(?:Context)?Function\d+|\*:|Tuple|Matchable)$$".r
 
-  def selectType(name: TastyName.TypeName, prefix: Type)(implicit ctx: Context): Type = selectType(name, prefix, prefix)
-  def selectType(name: TastyName.TypeName, prefix: Type, space: Type)(implicit ctx: Context): Type = {
-    import scala.tools.tasty.TastyName._
-
-    def lookupType = namedMemberOfTypeWithPrefix(prefix, space, name)
-
-    // we escape some types in the scala package especially
-    if (prefix.typeSymbol === u.definitions.ScalaPackage) {
-      name match {
-        case TypeName(SimpleName(raw @ SyntheticScala3Type())) => raw match {
-          case tpnme.And                                              => AndTpe
-          case tpnme.Or                                               => unionIsUnsupported
-          case tpnme.ContextFunctionN(n) if (n.toInt > 0)             => ContextFunctionType(n.toInt)
-          case tpnme.FunctionN(n)        if (n.toInt > 22)            => FunctionXXLType(n.toInt)
-          case tpnme.TupleCons                                        => genTupleIsUnsupported("scala.*:")
-          case tpnme.Tuple               if !ctx.mode.is(ReadParents) => genTupleIsUnsupported("scala.Tuple")
-          case tpnme.AnyKind                                          => u.definitions.AnyTpe
-          case tpnme.Matchable                                        => u.definitions.AnyTpe
-          case _                                                      => lookupType
-        }
-
-        case _ => lookupType
-      }
-    }
-    else {
-      lookupType
-    }
-  }
-
-  def selectTerm(name: TastyName, prefix: Type)(implicit ctx: Context): Type = selectTerm(name, prefix, prefix)
-  def selectTerm(name: TastyName, prefix: Type, space: Type)(implicit ctx: Context): Type =
-    namedMemberOfTypeWithPrefix(prefix, space, name.toTermName)
-
-  def singletonLike(tpe: Type): Symbol = tpe match {
-    case u.SingleType(_, sym) => sym
-    case u.TypeRef(_,sym,_)   => sym
-    case x                    => throw new MatchError(x)
-  }
-
-  private[TypeOps] val NoSymbolFn = (_: Context) => u.NoSymbol
-
   sealed abstract trait TastyRepr extends u.Type {
-    def originalFlagSet: TastyFlagSet
-    final def tastyOnlyFlags: TastyFlagSet = originalFlagSet & FlagSets.TastyOnlyFlags
+    def tflags: TastyFlagSet
+    final def unsupportedFlags: TastyFlagSet = tflags & FlagSets.TastyOnlyFlags
   }
 
-  abstract class TastyCompleter(isClass: Boolean, final val originalFlagSet: TastyFlagSet)(implicit
-      capturedCtx: Context) extends u.LazyType with TastyRepr with u.FlagAgnosticCompleter {
-
+  abstract class TastyCompleter(
+      isClass: Boolean,
+      tflags: TastyFlagSet
+  )(implicit capturedCtx: Context)
+      extends BaseTastyCompleter(tflags) {
     override final val decls: u.Scope = if (isClass) u.newScope else u.EmptyScope
+  }
+
+  private[TypeOps] class CopyCompleter(
+      underlying: u.TermSymbol,
+      tflags: TastyFlagSet
+  )(implicit ctx: Context)
+      extends BaseTastyCompleter(tflags) {
+    def computeInfo(sym: Symbol)(implicit ctx: Context): Unit = {
+      underlying.ensureCompleted(CopySym)
+      sym.info = underlying.tpe
+      underlying.attachments.all.foreach(sym.updateAttachment(_))
+    }
+  }
+
+  /** This completer ensures that if the "fake" singleton enum module class
+   *  is completed first, that it completes the module symbol which
+   *  then completes the module class.
+   */
+  private[TypeOps] class SingletonEnumModuleClassCompleter(
+      enumValue: u.TermSymbol,
+      tflags: TastyFlagSet
+  )(implicit ctx: Context)
+      extends BaseTastyCompleter(tflags) {
+    def computeInfo(sym: Symbol)(implicit ctx: Context): Unit = {
+      enumValue.ensureCompleted(EnumProxy)
+    }
+  }
+
+  private[TypeOps] class LocalSealedChildProxyCompleter(
+      parent: Symbol,
+      tflags: TastyFlagSet
+  )(implicit ctx: Context)
+      extends BaseTastyCompleter(tflags) {
+    def computeInfo(sym: Symbol)(implicit ctx: Context): Unit = {
+      sym.info = defn.ClassInfoType(parent.tpe_* :: Nil, sym) // TODO [tasty]: check if tpe_* forces
+    }
+  }
+
+  private[TypeOps] final class LambdaParamCompleter(
+      flags: TastyFlagSet,
+      idx: Int,
+      infoDb: Int => Type,
+  )(implicit ctx: Context)
+      extends BaseTastyCompleter(flags) {
+    override def computeInfo(denot: Symbol)(implicit ctx: Context): Unit =
+      denot.info = infoDb(idx)
+  }
+
+  abstract class BaseTastyCompleter(
+      final val tflags: TastyFlagSet
+  )(implicit capturedCtx: Context)
+      extends u.LazyType
+      with TastyRepr
+      with u.FlagAgnosticCompleter {
 
     override final def load(sym: Symbol): Unit =
       complete(sym)
@@ -412,54 +576,12 @@ trait TypeOps { self: TastyUniverse =>
     def computeInfo(sym: Symbol)(implicit ctx: Context): Unit
   }
 
-  private[TypeOps] class CopyCompleter(underlying: u.TermSymbol, final val originalFlagSet: TastyFlagSet)
-      extends u.LazyType with TastyRepr with u.FlagAgnosticCompleter {
-    override final def complete(sym: Symbol): Unit = {
-      underlying.ensureCompleted()
-      sym.info = underlying.tpe
-    }
-  }
+  private[bridge] def lookupTypeFrom(owner: Type)(pre: Type, tname: TastyName)(implicit ctx: Context): Type =
+    defn.NamedType(pre, lookupSymbol(owner, tname))
 
-  def prefixedRef(prefix: Type, sym: Symbol): Type = {
-    if (sym.isType) {
-      prefix match {
-        case tp: u.ThisType if tp.sym.isRefinementClass => sym.preciseRef(prefix)
-        case _:u.SingleType | _:u.RefinedType           => sym.preciseRef(prefix)
-        case _                                          => sym.ref
-      }
-    }
-    else if (sym.isConstructor) {
-      normaliseConstructorRef(sym)
-    }
-    else {
-      u.singleType(prefix, sym)
-    }
-  }
-
-  def normaliseConstructorRef(ctor: Symbol): Type = {
-    var tpe = ctor.tpe
-    val tParams = ctor.owner.typeParams
-    if (tParams.nonEmpty) tpe = u.PolyType(tParams, tpe)
-    tpe
-  }
-
-  def namedMemberOfPrefix(pre: Type, name: TastyName)(implicit ctx: Context): Type =
-    namedMemberOfTypeWithPrefix(pre, pre, name)
-
-  def namedMemberOfTypeWithPrefix(pre: Type, space: Type, tname: TastyName)(implicit ctx: Context): Type = {
-    prefixedRef(pre, namedMemberOfType(space, tname))
-  }
-
-  def lambdaResultType(resType: Type): Type = resType match {
+  private def lambdaResultType(resType: Type): Type = resType match {
     case res: LambdaPolyType => res.toNested
     case res                 => res
-  }
-
-  abstract class LambdaTypeCompanion[N <: TastyName] {
-    def factory(params: List[N])(registerCallback: Type => Unit, paramInfosOp: () => List[Type], resultTypeOp: () => Type)(implicit ctx: Context): LambdaType
-
-    final def apply(params: List[N])(registerCallback: Type => Unit, paramInfosOp: () => List[Type], resultTypeOp: () => Type)(implicit ctx: Context): Type =
-      factory(params)(registerCallback, paramInfosOp, resultTypeOp).canonical
   }
 
   final class LambdaPolyType(typeParams: List[Symbol], val resType: Type) extends u.PolyType(typeParams, LambdaPolyType.addLower(resType)) {
@@ -488,87 +610,239 @@ trait TypeOps { self: TastyUniverse =>
 
   private[bridge] final class OpaqueTypeBounds(lo: Type, hi: Type, val alias: Type) extends u.TypeBounds(lo, hi)
 
-  def typeRef(tpe: Type): Type = u.appliedType(tpe, Nil)
-
   /** The given type, unless `sym` is a constructor, in which case the
    *  type of the constructed instance is returned
    */
-  def effectiveResultType(sym: Symbol, typeParams: List[Symbol], givenTp: Type): Type =
+  def effectiveResultType(sym: Symbol, givenTp: Type): Type =
     if (sym.name == u.nme.CONSTRUCTOR) sym.owner.tpe
     else givenTp
 
-  private[TypeOps] type LambdaType = Type with Lambda
-  private[TypeOps] type TypeLambda = LambdaType with TypeLike
-  private[TypeOps] type TermLambda = LambdaType with TermLike
+  /** Lazy thread unsafe non-nullable value that can not be re-entered */
+  private[bridge] final class SyncRef[A](private var compute: () => A) {
+    private var out: A = _
+    private var entered: Boolean = false
 
-  private[TypeOps] trait TypeLike { self: Type with Lambda =>
-    type ThisTName = TastyName.TypeName
-    type ThisName  = u.TypeName
-  }
-
-  private[TypeOps] trait TermLike { self: Type with Lambda =>
-    type ThisTName = TastyName
-    type ThisName  = u.TermName
-    type PInfo     = Type
-  }
-
-  private[TypeOps] trait Lambda extends Product with Serializable { self: Type =>
-    type ThisTName <: TastyName
-    type ThisName <: u.Name
-    type This <: Type
-
-    val paramNames: List[ThisName]
-    val paramInfos: List[Type]
-    val resType: Type
-
-    def typeParams: List[Symbol] // deferred to final implementation
-
-    final protected def validateThisLambda(): Unit = {
-      assert(resType.isComplete, self)
-      assert(paramInfos.length == paramNames.length, self)
+    def apply(): A = {
+      if (entered) {
+        assert(out != null, "cyclic completion of SyncRef")
+      }
+      else {
+        entered = true
+        val result = compute()
+        compute = null
+        assert(result != null, "SyncRef is non-nullable")
+        out = result
+      }
+      out
     }
+  }
+
+  object MethodTermLambda extends TermLambdaFactory {
+
+    type ThisLambda = MethodTermLambda
+
+    protected def apply(
+        params: ArraySeq[TastyName],
+        flags: TastyFlagSet,
+        paramInfosOp: ArraySeq[Symbol] => ArraySeq[Type],
+        resultTypeOp: () => Type,
+        registerCallback: Type => Unit,
+    )(implicit ctx: Context): ThisLambda = {
+      new MethodTermLambda(params, paramInfosOp, resultTypeOp, flags, registerCallback)
+    }
+
+  }
+
+  private[TypeOps] final class MethodTermLambda(
+      paramTNames: ArraySeq[TastyName],
+      paramInfosOp: ArraySeq[Symbol] => ArraySeq[Type],
+      resultTypeOp: () => Type,
+      flags: TastyFlagSet,
+      registerCallback: Type => Unit,
+  )(implicit ctx: Context)
+      extends TermLambda("MethodTermLambda")(paramTNames, paramInfosOp, resultTypeOp, flags)(registerCallback) {
+
+    protected def canonical(ps: List[Symbol], res: Type): Type = u.MethodType(ps, res)
+
+    override def canEqual(that: Any): Boolean = that.isInstanceOf[MethodTermLambda]
+  }
+
+  object HKTypeLambda extends TypeLambdaFactory {
+
+    type ThisLambda = HKTypeLambda
+
+    protected def apply(
+        params: ArraySeq[TastyName.TypeName],
+        flags: TastyFlagSet,
+        paramInfosOp: ArraySeq[Symbol] => ArraySeq[Type],
+        resultTypeOp: () => Type,
+        registerCallback: Type => Unit,
+    )(implicit ctx: Context): ThisLambda = {
+      new HKTypeLambda(params, flags, paramInfosOp, resultTypeOp, registerCallback)
+    }
+  }
+
+  private[TypeOps] final class HKTypeLambda(
+      paramTNames: ArraySeq[TastyName.TypeName],
+      flags: TastyFlagSet,
+      paramInfosOp: ArraySeq[Symbol] => ArraySeq[Type],
+      resultTypeOp: () => Type,
+      registerCallback: Type => Unit
+  )(implicit ctx: Context)
+      extends TypeLambda("HKTypeLambda")(paramTNames, flags, paramInfosOp, resultTypeOp)(registerCallback) {
+
+    final override protected def normaliseResult(resType: Type): Type = lambdaResultType(resType)
+
+    protected def canonical(ps: List[Symbol], res: Type): Type = new LambdaPolyType(ps, res)
+
+    override def canEqual(that: Any): Boolean = that.isInstanceOf[HKTypeLambda]
+  }
+
+  object PolyTypeLambda extends TypeLambdaFactory {
+
+    type ThisLambda = PolyTypeLambda
+
+    protected def apply(
+        params: ArraySeq[TastyName.TypeName],
+        flags: TastyFlagSet,
+        paramInfosOp: ArraySeq[Symbol] => ArraySeq[Type],
+        resultTypeOp: () => Type,
+        registerCallback: Type => Unit,
+    )(implicit ctx: Context): ThisLambda = {
+      new PolyTypeLambda(params, flags, paramInfosOp, resultTypeOp, registerCallback)
+    }
+  }
+
+  private[TypeOps] final class PolyTypeLambda(
+      paramTNames: ArraySeq[TastyName.TypeName],
+      flags: TastyFlagSet,
+      paramInfosOp: ArraySeq[Symbol] => ArraySeq[Type],
+      resultTypeOp: () => Type,
+      registerCallback: Type => Unit
+  )(implicit ctx: Context)
+      extends TypeLambda("PolyTypeLambda")(paramTNames, flags, paramInfosOp, resultTypeOp)(registerCallback) {
+
+    protected def canonical(ps: List[Symbol], res: Type): Type = u.PolyType(ps, res)
+
+    override def canEqual(that: Any): Boolean = that.isInstanceOf[PolyTypeLambda]
+  }
+
+  private[TypeOps] abstract class TypeLambda(
+      kind: String)(
+      paramTNames: ArraySeq[TastyName.TypeName],
+      flags: TastyFlagSet,
+      paramInfosOp: ArraySeq[Symbol] => ArraySeq[Type],
+      resultTypeOp: () => Type)(
+      registerCallback: Type => Unit
+  )(implicit ctx: Context)
+      extends LambdaType(kind)(paramTNames, paramInfosOp, resultTypeOp, flags)(registerCallback) {
+    final override def typeParams: List[Symbol] = lambdaParams.toList
+    final protected def normaliseParam(info: Type): Type = normaliseIfBounds(info)
+  }
+
+  private[TypeOps] abstract class TermLambda(
+      kind: String)(
+      paramTNames: ArraySeq[TastyName],
+      paramInfosOp: ArraySeq[Symbol] => ArraySeq[Type],
+      resultTypeOp: () => Type,
+      flags: TastyFlagSet)(
+      registerCallback: Type => Unit
+  )(implicit ctx: Context)
+      extends LambdaType(kind)(paramTNames, paramInfosOp, resultTypeOp, flags)(registerCallback) {
+    final override def params: List[Symbol] = lambdaParams.toList
+    final protected def normaliseParam(info: Type): Type = info
+  }
+
+  private[TypeOps] abstract class LambdaType(
+      kind: String)(
+      paramTNames: ArraySeq[TastyName],
+      paramInfosOp: ArraySeq[Symbol] => ArraySeq[Type],
+      resultTypeOp: () => Type,
+      flags: TastyFlagSet)(
+      registerCallback: Type => Unit
+  )(implicit ctx: Context) extends AbstractLambdaType(kind) {
+
+    protected def normaliseParam(info: Type): Type
+    protected def normaliseResult(resType: Type): Type = resType
+
+    final val lambdaParams: ArraySeq[Symbol] = {
+      val paramInfoDb = new SyncRef(() => paramInfosOp(this.lambdaParams))
+      def infoAt(idx: Int) = normaliseParam(paramInfoDb()(idx))
+
+      paramTNames.zipWithIndex.map { case (tname, idx) =>
+        ctx.newLambdaParameter(tname, flags, idx, infoAt)
+      }
+    }
+
+    registerCallback(this)
+
+    final val resType: Type = normaliseResult(resultTypeOp())
+
+  }
+
+  private[TypeOps] abstract class AbstractLambdaType(override val productPrefix: String)
+      extends Type
+         with Product
+         with Serializable {
+
+    def lambdaParams: ArraySeq[Symbol]
+    def resType: Type
+
+    final override def etaExpand: Type = {
+      lambdaParams.foreach(_.info) // force locally
+      canonical(lambdaParams.toList, resType)
+    }
+
+    protected def canonical(ps: List[Symbol], res: Type): Type
 
     override final def productArity: Int = 2
 
     override final def productElement(n: Int): Any = n match {
-      case 0 => paramNames
+      case 0 => lambdaParams
       case 1 => resType
       case _ => throw new IndexOutOfBoundsException(n.toString)
     }
 
-    def canEqual(that: Any): Boolean = that.isInstanceOf[Lambda]
-
-    def canonical: This
-
     override final def equals(that: Any): Boolean = that match {
-      case that: Lambda =>
+      case that: AbstractLambdaType =>
         (that.canEqual(self)
-          && that.paramNames == paramNames
-          && that.resType    == resType)
+          && that.lambdaParams == lambdaParams
+          && that.resType == resType)
       case _ => false
     }
+
   }
 
-  object HKTypeLambda extends TypeLambdaCompanion {
-    def factory(params: List[TastyName.TypeName])(registerCallback: Type => Unit,
-        paramInfosOp: () => List[Type], resultTypeOp: () => Type)(implicit ctx: Context): LambdaType =
-      new HKTypeLambda(params)(registerCallback, paramInfosOp, resultTypeOp)
+  abstract class LambdaFactory[N <: TastyName] {
+
+    type ThisLambda <: LambdaType
+
+    protected def apply(
+        params: ArraySeq[N],
+        flags: TastyFlagSet,
+        paramInfosOp: ArraySeq[Symbol] => ArraySeq[Type],
+        resultTypeOp: () => Type,
+        registerCallback: Type => Unit,
+    )(implicit ctx: Context): ThisLambda
+
   }
 
-  object PolyType extends TypeLambdaCompanion {
-    def factory(params: List[TastyName.TypeName])(registerCallback: Type => Unit,
-         paramInfosOp: () => List[Type], resultTypeOp: () => Type)(implicit ctx: Context): LambdaType =
-      new PolyTypeLambda(params)(registerCallback, paramInfosOp, resultTypeOp)
+  object LambdaFactory {
+    final def parse[N <: TastyName](
+        factory: LambdaFactory[N],
+        params: ArraySeq[N],
+        flags: TastyFlagSet)(
+        paramInfosOp: ArraySeq[Symbol] => ArraySeq[Type],
+        resultTypeOp: () => Type,
+        registerCallback: Type => Unit,
+    )(implicit ctx: Context): Type =
+      factory(params, flags, paramInfosOp, resultTypeOp, registerCallback)
+        .etaExpand // turn the LambdaType into something the compiler understands
+        .tap(registerCallback) // we should replace the type at start as it has been expanded
   }
 
-  final class MethodTypeCompanion(defaultFlags: TastyFlagSet) extends TermLambdaCompanion { self =>
-    def factory(params: List[TastyName])(registerCallback: Type => Unit,
-        paramInfosOp: () => List[Type], resultTypeOp: () => Type)(implicit ctx: Context): LambdaType =
-      new MethodTermLambda(params, defaultFlags)(registerCallback, paramInfosOp, resultTypeOp)
-  }
-
-  def recThis(tpe: Type): Type = tpe.asInstanceOf[RecType].recThis
-  def symOfTypeRef(tpe: Type): Symbol = tpe.asInstanceOf[u.TypeRef].sym
+  abstract class TermLambdaFactory extends LambdaFactory[TastyName]
+  abstract class TypeLambdaFactory extends LambdaFactory[TastyName.TypeName]
 
   private[TypeOps] final class RecType(run: RecType => Type)(implicit ctx: Context) extends Type with Product {
 
@@ -589,95 +863,6 @@ trait TypeOps { self: TastyUniverse =>
     override def equals(that: Any): Boolean = this eq that.asInstanceOf[AnyRef]
     override def safeToString: String = s"RecType(rt @ $hashCode => ${if (parent == null) "<under-construction>" else parent})"
 
-  }
-
-  def methodTypeCompanion(initialFlags: TastyFlagSet): MethodTypeCompanion = new MethodTypeCompanion(initialFlags)
-
-  abstract class TermLambdaCompanion
-    extends LambdaTypeCompanion[TastyName]
-
-  abstract class TypeLambdaCompanion
-    extends LambdaTypeCompanion[TastyName.TypeName]
-
-  private[TypeOps] final class MethodTermLambda(paramTNames: List[TastyName], defaultFlags: TastyFlagSet)(registerCallback: MethodTermLambda => Unit,
-    paramInfosOp: () => List[Type], resultTypeOp: () => Type)(implicit ctx: Context)
-  extends Type with Lambda with TermLike { methodLambda =>
-    type This = u.MethodType
-
-    val paramNames: List[u.TermName] = paramTNames.map(encodeTermName)
-
-    override val productPrefix = "MethodTermLambda"
-
-    registerCallback(this)
-
-    val paramInfos: List[Type] = paramInfosOp()
-
-    override val params: List[Symbol] = paramNames.lazyZip(paramInfos).map {
-      case (name, argInfo) => ctx.owner.newValueParameter(name, u.NoPosition, encodeFlagSet(defaultFlags)).setInfo(argInfo)
-    }
-
-    val resType: Type = resultTypeOp()
-
-    validateThisLambda()
-
-    def canonical: u.MethodType = u.MethodType(params, resType)
-
-    override def canEqual(that: Any): Boolean = that.isInstanceOf[MethodTermLambda]
-  }
-
-  private[TypeOps] final class HKTypeLambda(paramTNames: List[TastyName.TypeName])(registerCallback: HKTypeLambda => Unit,
-    paramInfosOp: () => List[Type], resultTypeOp: () => Type)(implicit ctx: Context)
-  extends Type with Lambda with TypeLike {
-
-    type This = LambdaPolyType
-    val paramNames: List[u.TypeName] = paramTNames.map(encodeTypeName)
-
-    override val productPrefix = "HKTypeLambda"
-
-    registerCallback(this)
-
-    val paramInfos: List[Type] = paramInfosOp()
-
-    override val typeParams: List[Symbol] = paramNames.lazyZip(paramInfos).map {
-      case (name, bounds) =>
-        val argInfo = normaliseIfBounds(bounds)
-        ctx.owner.newTypeParameter(name, u.NoPosition, u.Flag.DEFERRED).setInfo(argInfo)
-    }
-
-    val resType: Type = lambdaResultType(resultTypeOp())
-
-    validateThisLambda()
-
-    def canonical: LambdaPolyType = new LambdaPolyType(typeParams, resType)
-
-    override def canEqual(that: Any): Boolean = that.isInstanceOf[HKTypeLambda]
-  }
-
-  private[TypeOps] final class PolyTypeLambda(paramTNames: List[TastyName.TypeName])(registerCallback: PolyTypeLambda => Unit,
-    paramInfosOp: () => List[Type], resultTypeOp: () => Type)(implicit ctx: Context)
-  extends Type with Lambda with TypeLike {
-
-    type This = u.PolyType
-
-    val paramNames: List[u.TypeName] = paramTNames.map(encodeTypeName)
-
-    override val productPrefix = "PolyTypeLambda"
-
-    registerCallback(this)
-
-    val paramInfos: List[Type] = paramInfosOp()
-
-    override val typeParams: List[Symbol] = paramNames.lazyZip(paramInfos).map {
-      case (name, argInfo) => ctx.owner.newTypeParameter(name, u.NoPosition, u.Flag.DEFERRED).setInfo(argInfo)
-    }
-
-    val resType: Type = resultTypeOp() // potentially need to flatten? (probably not, happens in typer in dotty)
-
-    validateThisLambda()
-
-    def canonical: u.PolyType = u.PolyType(typeParams, resType)
-
-    override def canEqual(that: Any): Boolean = that.isInstanceOf[PolyTypeLambda]
   }
 
 }

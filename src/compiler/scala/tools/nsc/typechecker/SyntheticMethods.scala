@@ -77,10 +77,8 @@ trait SyntheticMethods extends ast.TreeDSL {
     if (!syntheticsOk)
       return templ
 
-    val synthesizer = new ClassMethodSynthesis(
-      clazz0,
-      newTyper( if (reporter.hasErrors) context makeSilent false else context )
-    )
+    val typer = newTyper(if (reporter.hasErrors) context.makeSilent(false) else context)
+    val synthesizer = new ClassMethodSynthesis(clazz0, typer)
     import synthesizer._
 
     if (clazz0 == AnyValClass || isPrimitiveValueClass(clazz0)) return {
@@ -126,8 +124,8 @@ trait SyntheticMethods extends ast.TreeDSL {
       createSwitchMethod(name, accessors.indices, returnType)(idx => caseFn(accessors(idx)))
 
     def productElementNameMethod = {
-      val constrParamAccessors = clazz.constrParamAccessors
-      createSwitchMethod(nme.productElementName, constrParamAccessors.indices, StringTpe)(idx => LIT(constrParamAccessors(idx).name.dropLocal.decode))
+      val elementAccessors = clazz.constrParamAccessors.take(arity)
+      createSwitchMethod(nme.productElementName, elementAccessors.indices, StringTpe)(idx => LIT(elementAccessors(idx).name.dropLocal.decode))
     }
 
     var syntheticCanEqual = false
@@ -154,7 +152,7 @@ trait SyntheticMethods extends ast.TreeDSL {
       Match(
         Ident(eqmeth.firstParam),
         List(
-          CaseDef(Typed(Ident(nme.WILDCARD), TypeTree(clazz.tpe)), EmptyTree, TRUE),
+          CaseDef(Typed(Ident(nme.WILDCARD), TypeTree(typer.applyTypeToWildcards(clazz.tpe))), EmptyTree, TRUE),
           CaseDef(Ident(nme.WILDCARD), EmptyTree, FALSE)
         )
       )
@@ -283,10 +281,7 @@ trait SyntheticMethods extends ast.TreeDSL {
         case sym => (sym, () => productElementNameMethod) :: Nil
       }
 
-      List(
-        productMethods,
-        elementName
-      ).flatten
+      productMethods ::: elementName
     }
 
     def hashcodeImplementation(sym: Symbol): Tree = {

@@ -239,7 +239,7 @@ trait Infer extends Checkable {
 
     // When filtering sym down to the accessible alternatives leaves us empty handed.
     private def checkAccessibleError(tree: Tree, sym: Symbol, pre: Type, site: Tree): Tree = {
-      if (settings.debug) {
+      if (settings.isDebug) {
         Console.println(context)
         Console.println(tree)
         Console.println("" + pre + " " + sym.owner + " " + context.owner + " " + context.outer.enclClass.owner + " " + sym.owner.thisType + (pre =:= sym.owner.thisType))
@@ -1076,7 +1076,11 @@ trait Infer extends Checkable {
      */
     def inferMethodInstance(fn: Tree, undetParams: List[Symbol],
                             args: List[Tree], pt0: Type): List[Symbol] = fn.tpe match {
-      case mt @ MethodType(params0, _) =>
+      case mt: MethodType =>
+        // If we can't infer the type parameters, we can recover in `tryTypedApply` with an implicit conversion,
+        // but only when implicit conversions are enabled. In that case we have to infer the type parameters again.
+        def noInstanceResult = if (context.implicitsEnabled) undetParams else Nil
+
         try {
           val pt      = if (pt0.typeSymbol == UnitClass) WildcardType else pt0
           val formals = formalTypes(mt.paramTypes, args.length)
@@ -1094,17 +1098,17 @@ trait Infer extends Checkable {
             adjusted.undetParams match {
               case Nil  => Nil
               case xs   =>
-                // #3890
+                // scala/bug#3890
                 val xs1 = treeSubst.typeMap mapOver xs
                 if (xs ne xs1)
                   new TreeSymSubstTraverser(xs, xs1) traverseTrees fn :: args
                 enhanceBounds(adjusted.okParams, adjusted.okArgs, xs1)
                 xs1
             }
-          } else Nil
-        }
-        catch ifNoInstance { msg =>
-          NoMethodInstanceError(fn, args, msg); List()
+          } else noInstanceResult
+        } catch ifNoInstance { msg =>
+          NoMethodInstanceError(fn, args, msg)
+          noInstanceResult
         }
       case x => throw new MatchError(x)
     }
@@ -1256,7 +1260,7 @@ trait Infer extends Checkable {
       }
     }
 
-    def inferTypedPattern(tree0: Tree, pattp: Type, pt0: Type, canRemedy: Boolean): Type = {
+    def inferTypedPattern(tree0: Tree, pattp: Type, pt0: Type, canRemedy: Boolean, isUnapply: Boolean): Type = {
       val pt        = abstractTypesToBounds(pt0)
       val ptparams  = freeTypeParamsOfTerms(pt)
       val tpparams  = freeTypeParamsOfTerms(pattp)
@@ -1273,7 +1277,7 @@ trait Infer extends Checkable {
         return ErrorType
       }
 
-      checkCheckable(tree0, pattp, pt, inPattern = true, canRemedy)
+      checkCheckable(tree0, if (isUnapply) typer.applyTypeToWildcards(pattp) else pattp, pt, inPattern = true, canRemedy = canRemedy)
       if (pattp <:< pt) ()
       else {
         debuglog("free type params (1) = " + tpparams)

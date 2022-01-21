@@ -4,10 +4,11 @@ import scala.util.Try
 
 object DotcDecompiler extends Script.Command {
 
-  private[this] lazy val dotcProcess = Dotc.processMethod("dotty.tools.dotc.decompiler.Main")
+  private def dotcProcess(args: Seq[String])(implicit cl: Dotc.ClassLoader) =
+    Dotc.processMethod("dotty.tools.dotc.decompiler.Main")(args)
 
-  def decompile(source: String, additionalSettings: Seq[String]): Try[Boolean] =
-    dotcProcess(("-usejavacp" +: additionalSettings :+ source).toArray)
+  def decompile(source: String, additionalSettings: Seq[String])(implicit cl: Dotc.ClassLoader): Try[Boolean] =
+    dotcProcess(("-usejavacp" +: additionalSettings :+ source))
 
   val commandName: String = "dotcd"
   val describe: String = s"$commandName <tasty: File> <args: String*>"
@@ -18,8 +19,10 @@ object DotcDecompiler extends Script.Command {
       return 1
     }
     val Seq(tasty, additionalSettings @ _*) = args: @unchecked
-    val success = decompile(tasty, additionalSettings).get
-    if (success) 0 else 1
+    Dotc.processIn { implicit scala3classloader =>
+      val success = decompile(tasty, additionalSettings).get
+      if (success) 0 else 1
+    }
   }
 
 }

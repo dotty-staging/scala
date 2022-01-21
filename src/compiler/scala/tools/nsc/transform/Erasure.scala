@@ -94,7 +94,7 @@ abstract class Erasure extends InfoTransform
       if (! ts.isEmpty && ! result) { apply(ts.head) ; untilApply(ts.tail) }
   }
 
-  override protected def verifyJavaErasure = settings.Xverify || settings.debug
+  override protected def verifyJavaErasure = settings.Xverify || settings.isDebug
   private def needsJavaSig(sym: Symbol, tp: Type, throwsArgs: List[Type]) = !settings.Ynogenericsig && {
     def needs(tp: Type) = NeedsSigCollector(sym.isClassConstructor).collect(tp)
     needs(tp) || throwsArgs.exists(needs)
@@ -518,7 +518,7 @@ abstract class Erasure extends InfoTransform
         clashErrors += Tuple2(pos, msg)
       }
       for (bc <- root.baseClasses) {
-        if (settings.debug)
+        if (settings.isDebug)
           exitingPostErasure(println(
             sm"""check bridge overrides in $bc
                 |${bc.info.nonPrivateDecl(bridge.name)}
@@ -652,7 +652,7 @@ abstract class Erasure extends InfoTransform
       val rhs = member.tpe match {
         case MethodType(Nil, FoldableConstantType(c)) => Literal(c)
         case _                                =>
-          val sel: Tree    = Select(This(root), member)
+          val sel: Tree    = gen.mkAttributedSelect(gen.mkAttributedThis(root), member)
           val bridgingCall = bridge.paramss.foldLeft(sel)((fun, vparams) => Apply(fun, vparams map Ident))
 
           maybeWrap(bridgingCall)
@@ -1297,7 +1297,6 @@ abstract class Erasure extends InfoTransform
           if (ct.tag == ClazzTag && ct.typeValue.typeSymbol != definitions.UnitClass) {
             val typeValue = ct.typeValue.dealiasWiden
             val erased = erasure(typeValue.typeSymbol) applyInArray typeValue
-
             treeCopy.Literal(cleanLiteral, Constant(erased))
           } else cleanLiteral
 
