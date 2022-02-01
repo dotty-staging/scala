@@ -34,10 +34,10 @@ object JitWatchFilePlugin extends AutoPlugin {
 
       // Transitive sources from the projects that contribute to this classpath.
       val projects: Seq[ProjectRef] = buildDependencies.value.classpathTransitiveRefs(thisProjectRef.value) :+ thisProjectRef.value
-      val projectArtifacts: Map[ProjectRef, Seq[Artifact]] = projects.map(project => (project -> (Keys.artifacts in project get settingsData.value).getOrElse(Nil))).toMap
-      val artifactNameToProject: Map[String, Seq[ProjectRef]] = projects.groupBy(project => (Keys.name in project get settingsData.value).getOrElse(""))
+      val projectArtifacts: Map[ProjectRef, Seq[Artifact]] = projects.map(project => (project -> ((project / Keys.artifacts) get settingsData.value).getOrElse(Nil))).toMap
+      val artifactNameToProject: Map[String, Seq[ProjectRef]] = projects.groupBy(project => ((project / Keys.name) get settingsData.value).getOrElse(""))
       val transitiveSourceDirectories =  projects.flatMap { project =>
-        val projectArtifacts: Seq[Artifact] = (Keys.artifacts in project get settingsData.value).getOrElse(Nil)
+        val projectArtifacts: Seq[Artifact] = ((project / Keys.artifacts) get settingsData.value).getOrElse(Nil)
         val matching = projectArtifacts.filter(artifacts.contains(_))
         val configs = matching.flatMap(artifact => artifact.configurations).distinct
         val sourceDirectories: Seq[File] = configs.flatMap { configRef =>
