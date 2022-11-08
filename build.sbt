@@ -206,6 +206,7 @@ lazy val commonSettings = instanceSettings ++ clearSourceAndResourceDirectories 
     "-Wconf:cat=optimizer:is",
     // we use @nowarn for methods that are deprecated in JDK > 8, but CI/release is under JDK 8
     "-Wconf:cat=unused-nowarn:s",
+    "-Wconf:cat=deprecation&msg=in class Thread :s",
     "-Wunnamed-boolean-literal-strict",
     ),
   Compile / doc / scalacOptions ++= Seq(
@@ -502,9 +503,12 @@ lazy val reflect = configureAsSubproject(project)
     Osgi.bundleName := "Scala Reflect",
     Compile / scalacOptions ++= Seq(
       "-Wconf:cat=deprecation&msg=early initializers:s", // compiler heavily relies upon early initializers
+      "-Xlint",
+      "-feature",
     ),
     Compile / doc / scalacOptions ++= Seq(
-      "-skip-packages", "scala.reflect.macros.internal:scala.reflect.internal:scala.reflect.io"
+      "-skip-packages", "scala.reflect.macros.internal:scala.reflect.internal:scala.reflect.io",
+      "-Xlint:-doc-detached,_",
     ),
     Osgi.headers +=
       "Import-Package" -> (raw"""scala.*;version="$${range;[==,=+);$${ver}}",""" +
@@ -650,6 +654,8 @@ lazy val scaladoc = configureAsSubproject(project)
     libraryDependencies ++= ScaladocSettings.webjarResources,
     Compile / resourceGenerators += ScaladocSettings.extractResourcesFromWebjar,
     Compile / scalacOptions ++= Seq(
+      "-Xlint:-doc-detached,_",
+      "-feature",
       "-Wconf:cat=deprecation&msg=early initializers:s",
     ),
   )
