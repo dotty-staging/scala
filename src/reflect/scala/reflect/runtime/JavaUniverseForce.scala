@@ -299,6 +299,7 @@ trait JavaUniverseForce { self: runtime.JavaUniverse  =>
     definitions.PredefModule
     definitions.SpecializableModule
     definitions.ScalaRunTimeModule
+    definitions.MurmurHash3Module
     definitions.SymbolModule
     definitions.ScalaNumberClass
     definitions.DelayedInitClass
