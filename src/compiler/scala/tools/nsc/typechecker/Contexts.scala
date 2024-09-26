@@ -1876,36 +1876,33 @@ trait Contexts { self: Analyzer with ImportTracking =>
       var renamed = false
       var selectors = tree.selectors
       @inline def current = selectors.head
-      @inline def maybeNonLocalMember(nom: Name): Symbol =
+      def maybeNonLocalMember(nom: Name): Symbol =
         if (qual.tpe.isError) NoSymbol
-        else if (pos.source.isJava) {
-          val (_, sym) = NoContext.javaFindMember(qual.tpe, nom, _ => true)
-          // We don't need to propagate the new prefix back out to the result of `Context.lookupSymbol`
-          // because typechecking .java sources doesn't need it.
-          sym
-        }
+        // We don't need to propagate the new prefix back out to the result of `Context.lookupSymbol`
+        // because typechecking .java sources doesn't need it.
+        else if (pos.source.isJava) NoContext.javaFindMember(qual.tpe, nom, _ => true)._2
         else {
           val tp = qual.tpe
-          val sym = tp.typeSymbol
           // opening package objects is delayed (scala/scala#9661), but that can lead to missing symbols for
           // package object types that are forced early through Definitions; see scala/bug#12740 / scala/scala#10333
-          if (phase.id < currentRun.typerPhase.id && sym.hasPackageFlag && analyzer.packageObjects.deferredOpen.remove(sym))
-            openPackageModule(sym)
+          if (phase.id < currentRun.typerPhase.id) {
+            val sym = tp.typeSymbol
+            if (sym.hasPackageFlag && analyzer.packageObjects.deferredOpen.remove(sym))
+              openPackageModule(sym)
+          }
           tp.nonLocalMember(nom)
         }
       while ((selectors ne Nil) && result == NoSymbol) {
         if (current.introduces(name))
-          result = maybeNonLocalMember(current.name asTypeOf name)
-        else if (!current.isWildcard && current.hasName(name))
+          result = maybeNonLocalMember(current.name.asTypeOf(name))
+        else if (!current.isWildcard && !current.isGiven && current.hasName(name))
           renamed = true
-        else if (current.isWildcard && !renamed && !requireExplicit)
-          result = maybeNonLocalMember(name)
-        else if (current.isGiven && !requireExplicit) {
-          val maybe = maybeNonLocalMember(name)
-          if (maybe.isImplicit)
-            result = maybe
-        }
-
+        else if (!renamed && !requireExplicit)
+          if (current.isWildcard)
+            result = maybeNonLocalMember(name)
+          else if (current.isGiven)
+            result = maybeNonLocalMember(name).filter(_.isImplicit)
+              .orElse(maybeNonLocalMember(name.toTypeName).filter(_.isImplicit))
         if (result == NoSymbol)
           selectors = selectors.tail
       }
