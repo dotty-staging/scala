@@ -1190,6 +1190,7 @@ class Global(var currentSettings: Settings, reporter0: Reporter)
       def packagePrefixImplicits = isScala3 && contains(o.packagePrefixImplicits)
       def implicitResolution     = isScala3 && contains(o.implicitResolution) || settings.Yscala3ImplicitResolution.value
       def doubleDefinitions      = isScala3 && contains(o.doubleDefinitions)
+      def etaExpandAlways        = isScala3 && contains(o.etaExpandAlways)
     }
 
     // used in sbt
