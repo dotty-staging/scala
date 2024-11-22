@@ -5,9 +5,12 @@ class C {
   val g: PartialFunction[String, Int] = (x: X) => x match { case "x" => 3 }     // error
 
   val m: PartialFunction[Int, Int] = (x: Double) => x match { case 3.14 => 3 }  // error
+
+  val g3: PartialFunction[Y, Int] = (x: X) => x match { case _: X => 3 }        // error
 }
 
-class X
+class Y
+class X extends Y
 
 object Test extends App {
   val c = new C

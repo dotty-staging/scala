@@ -2739,8 +2739,6 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
       }
     }
 
-    private lazy val topTypes: Set[Symbol] = Set(AnyClass, AnyValClass, ObjectClass)
-
     /** synthesize and type check a PartialFunction implementation based on the match in `tree`
      *
      *  `param => sel match { cases }` becomes:
@@ -2775,18 +2773,13 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
         return setError(tree)
       }
       val argTp =
-        if (paramType.eq(NoType) || argTp0 <:< paramType) argTp0
-        else {
-          val argTp1 = lub(List(argTp0, paramType))
-          if (settings.warnInferAny && topTypes(argTp1.typeSymbol))
-            context.warning(paramPos, s"a type was inferred to be `${argTp1.typeSymbol.name}` when constructing a PartialFunction", WarningCategory.LintInferAny)
-          argTp1
-        }
+        if (paramType.ne(NoType)) paramType
+        else argTp0
 
       // targs must conform to Any for us to synthesize an applyOrElse (fallback to apply otherwise -- typically for @cps annotated targs)
       val targsValidParams = (argTp <:< AnyTpe) && (resTp <:< AnyTpe)
 
-      val anonClass = context.owner newAnonymousFunctionClass tree.pos addAnnotation SerialVersionUIDAnnotation
+      val anonClass = context.owner.newAnonymousFunctionClass(tree.pos).addAnnotation(SerialVersionUIDAnnotation)
 
       import CODE._
 
@@ -2826,7 +2819,7 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
       }
 
       // `def applyOrElse[A1 <: $argTp, B1 >: $matchResTp](x: A1, default: A1 => B1): B1 =
-      //  ${`$selector match { $cases; case default$ => default(x) }`
+      //  ${`$selector match { $cases; case default$ => default(x) }`}
       def applyOrElseMethodDef = {
         val methodSym = anonClass.newMethod(nme.applyOrElse, tree.pos, FINAL | OVERRIDE)
 
@@ -2846,8 +2839,7 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
 
         // First, type without the default case; only the cases provided
         // by the user are typed. The LUB of these becomes `B`, the lower
-        // bound of `B1`, which in turn is the result type of the default
-        // case
+        // bound of `B1`, which in turn is the result type of the default case
         val match0 = methodBodyTyper.typedMatch(selector(x), cases, mode, resTp)
         val matchResTp = match0.tpe
 

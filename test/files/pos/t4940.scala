@@ -5,7 +5,7 @@ class C {
 
   val g: PartialFunction[X, Int] = (x: X) => x match { case X(i) => i }
   val g2: PartialFunction[X, Int] = (x: Y) => x match { case X(i) => i }
-  val g3: PartialFunction[Y, Int] = (x: X) => x match { case X(i) => i }
+  //val g3: PartialFunction[Y, Int] = (x: X) => x match { case X(i) => i }
 
   val m: PartialFunction[Double, Int] = (x: Double) => x match { case 3.14 => 3 }
 }
