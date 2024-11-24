@@ -74,7 +74,7 @@ trait SymbolOps { self: TastyUniverse =>
     def isTraitParamAccessor: Boolean = sym.owner.isTrait && repr.tflags.is(FieldAccessor|ParamSetter)
 
     def isParamGetter: Boolean =
-      sym.isMethod && sym.repr.tflags.is(FlagSets.ParamGetter)
+      sym.isMethod && repr.tflags.is(FlagSets.ParamGetter)
 
     /** A computed property that should only be called on a symbol which is known to have been initialised by the
      *  Tasty Unpickler and is not yet completed.
