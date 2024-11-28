@@ -944,5 +944,84 @@ trait TypeDiagnostics extends splain.SplainDiagnostics {
           context0.error(ex.pos, ex.msg)
       }
     }
+
+    /** Check that type of given tree does not contain local or private
+     *  components.
+     */
+    object checkNoEscaping extends TypeMap {
+      private var owner: Symbol = _
+      private var scope: Scope = _
+      private var hiddenSymbols: List[Symbol] = _
+
+      /** Check that type `tree` does not refer to private
+       *  components unless itself is wrapped in something private
+       *  (`owner` tells where the type occurs).
+       */
+      def privates[T <: Tree](typer: Typer, owner: Symbol, tree: T): T =
+        if (owner.isJavaDefined) tree else check(typer, owner, EmptyScope, WildcardType, tree)
+
+      @tailrec
+      private def check[T <: Tree](typer: Typer, owner: Symbol, scope: Scope, pt: Type, tree: T): T = {
+        this.owner = owner
+        this.scope = scope
+        hiddenSymbols = Nil
+        import typer.TyperErrorGen._
+        val tp1 = apply(tree.tpe)
+        if (hiddenSymbols.isEmpty) tree setType tp1
+        else if (hiddenSymbols exists (_.isErroneous)) HiddenSymbolWithError(tree)
+        else if (isFullyDefined(pt)) tree setType pt
+        else if (tp1.typeSymbol.isAnonymousClass)
+          check(typer, owner, scope, pt, tree setType tp1.typeSymbol.classBound)
+        else if (owner == NoSymbol)
+          tree setType packSymbols(hiddenSymbols.reverse, tp1)
+        else if (!isPastTyper) { // privates
+          val badSymbol = hiddenSymbols.head
+          SymbolEscapesScopeError(tree, badSymbol)
+        } else tree
+      }
+
+      def addHidden(sym: Symbol) =
+        if (!(hiddenSymbols contains sym)) hiddenSymbols = sym :: hiddenSymbols
+
+      override def apply(t: Type): Type = {
+        def checkNoEscape(sym: Symbol): Unit = {
+          if (sym.isPrivate && !sym.hasFlag(SYNTHETIC_PRIVATE)) {
+            var o = owner
+            while (o != NoSymbol && o != sym.owner && o != sym.owner.linkedClassOfClass &&
+              !o.isLocalToBlock && !o.isPrivate &&
+              !o.privateWithin.hasTransOwner(sym.owner))
+              o = o.owner
+            if (o == sym.owner || o == sym.owner.linkedClassOfClass)
+              addHidden(sym)
+          } else if (sym.owner.isTerm && !sym.isTypeParameterOrSkolem) {
+            var e = scope.lookupEntry(sym.name)
+            var found = false
+            while (!found && (e ne null) && e.owner == scope) {
+              if (e.sym == sym) {
+                found = true
+                addHidden(sym)
+              } else {
+                e = scope.lookupNextEntry(e)
+              }
+            }
+          }
+        }
+        mapOver(
+          t match {
+            case TypeRef(_, sym, args) =>
+              checkNoEscape(sym)
+              if (!hiddenSymbols.isEmpty && hiddenSymbols.head == sym &&
+                sym.isAliasType && sameLength(sym.typeParams, args)) {
+                hiddenSymbols = hiddenSymbols.tail
+                t.dealias
+              } else t
+            case SingleType(_, sym) =>
+              checkNoEscape(sym)
+              t
+            case _ =>
+              t
+          })
+      }
+    }
   }
 }
