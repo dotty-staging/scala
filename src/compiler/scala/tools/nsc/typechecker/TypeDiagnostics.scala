@@ -945,33 +945,29 @@ trait TypeDiagnostics extends splain.SplainDiagnostics {
       }
     }
 
-    /** Check that type of given tree does not contain local or private
-     *  components.
+    /** Check that type `tree` does not refer to private
+     *  components unless itself is wrapped in something private
+     *  (`owner` tells where the type occurs).
      */
-    object checkNoEscaping extends TypeMap {
-      private var owner: Symbol = _
-      private var scope: Scope = _
-      private var hiddenSymbols: List[Symbol] = _
+    def checkNoEscapingPrivates(typer: Typer, owner: Symbol, tree: Tree): Tree =
+      if (owner.isJavaDefined) tree
+      else new CheckNoEscaping(typer, owner, tree).check(tree)
 
-      /** Check that type `tree` does not refer to private
-       *  components unless itself is wrapped in something private
-       *  (`owner` tells where the type occurs).
-       */
-      def privates[T <: Tree](typer: Typer, owner: Symbol, tree: T): T =
-        if (owner.isJavaDefined) tree else check(typer, owner, EmptyScope, WildcardType, tree)
+    /** Check that type of given tree does not contain local or private components. */
+    final class CheckNoEscaping(typer: Typer, owner: Symbol, tree: Tree) extends TypeMap {
+      private var hiddenSymbols: List[Symbol] = Nil
+      private val warnStructural = !owner.isLocalToBlock && settings.warnStructuralType && (tree match {
+        case tt: TypeTree => tt.wasEmpty // inferred type
+        case _ => false
+      })
 
-      @tailrec
-      private def check[T <: Tree](typer: Typer, owner: Symbol, scope: Scope, pt: Type, tree: T): T = {
-        this.owner = owner
-        this.scope = scope
-        hiddenSymbols = Nil
+      def check(tree: Tree): Tree = {
         import typer.TyperErrorGen._
         val tp1 = apply(tree.tpe)
         if (hiddenSymbols.isEmpty) tree setType tp1
         else if (hiddenSymbols exists (_.isErroneous)) HiddenSymbolWithError(tree)
-        else if (isFullyDefined(pt)) tree setType pt
         else if (tp1.typeSymbol.isAnonymousClass)
-          check(typer, owner, scope, pt, tree setType tp1.typeSymbol.classBound)
+          check(tree setType tp1.typeSymbol.classBound)
         else if (owner == NoSymbol)
           tree setType packSymbols(hiddenSymbols.reverse, tp1)
         else if (!isPastTyper) { // privates
@@ -993,17 +989,6 @@ trait TypeDiagnostics extends splain.SplainDiagnostics {
               o = o.owner
             if (o == sym.owner || o == sym.owner.linkedClassOfClass)
               addHidden(sym)
-          } else if (sym.owner.isTerm && !sym.isTypeParameterOrSkolem) {
-            var e = scope.lookupEntry(sym.name)
-            var found = false
-            while (!found && (e ne null) && e.owner == scope) {
-              if (e.sym == sym) {
-                found = true
-                addHidden(sym)
-              } else {
-                e = scope.lookupNextEntry(e)
-              }
-            }
           }
         }
         mapOver(
@@ -1017,6 +1002,14 @@ trait TypeDiagnostics extends splain.SplainDiagnostics {
               } else t
             case SingleType(_, sym) =>
               checkNoEscape(sym)
+              t
+            case rt: RefinedType if warnStructural =>
+              val warns = rt.decls.filter(_.isOnlyRefinementMember)
+              if (warns.nonEmpty)
+                context.warning(owner.pos,
+                  s"""$owner has an inferred structural type: ${owner.tpe}
+                     |  members that can be accessed with a reflective call: ${warns.mkString(",")}""".stripMargin,
+                  WarningCategory.LintStructuralType)
               t
             case _ =>
               t
