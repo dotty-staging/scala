@@ -156,7 +156,7 @@ class ILoop(config: ShellConfig, inOverride: BufferedReader = null,
   }
 
   /** Show the history */
-  lazy val historyCommand = new LoopCommand("history", "show the history (optional num is commands to show)", None) {
+  lazy val historyCommand: LoopCommand = new LoopCommand("history", "show the history (optional num is commands to show)", None) {
     override def usage = "[num]"
     def defaultLines = 20
 
