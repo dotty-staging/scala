@@ -45,6 +45,17 @@ object MimaFilters extends AutoPlugin {
 
     // scala/scala#10927
     ProblemFilters.exclude[ReversedMissingMethodProblem]("scala.concurrent.Future.onCompleteWithUnregister"),
+
+    // scala/scala#10937
+    ProblemFilters.exclude[IncompatibleResultTypeProblem]("scala.collection.immutable.LazyList#LazyBuilder#DeferredState.eval"),
+    ProblemFilters.exclude[MissingClassProblem](s"scala.collection.immutable.LazyList$$State"),
+    ProblemFilters.exclude[MissingClassProblem](s"scala.collection.immutable.LazyList$$State$$"),
+    ProblemFilters.exclude[MissingClassProblem](s"scala.collection.immutable.LazyList$$State$$Cons"),
+    ProblemFilters.exclude[MissingClassProblem](s"scala.collection.immutable.LazyList$$State$$Empty$$"),
+    ProblemFilters.exclude[MissingClassProblem]("scala.collection.immutable.LazyList$EmptyMarker$"),
+    ProblemFilters.exclude[IncompatibleResultTypeProblem]("scala.collection.immutable.LazyList#LazyBuilder#DeferredState.eval"),
+    ProblemFilters.exclude[MissingClassProblem]("scala.collection.immutable.LazyList$MidEvaluation$"),
+    ProblemFilters.exclude[MissingClassProblem]("scala.collection.immutable.LazyList$Uninitialized$"),
   )
 
   override val buildSettings = Seq(
