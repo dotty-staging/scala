@@ -954,12 +954,8 @@ trait TypeDiagnostics extends splain.SplainDiagnostics {
       else new CheckNoEscaping(typer, owner, tree).check(tree)
 
     /** Check that type of given tree does not contain local or private components. */
-    final class CheckNoEscaping(typer: Typer, owner: Symbol, tree: Tree) extends TypeMap {
+    private final class CheckNoEscaping(typer: Typer, owner: Symbol, tree: Tree) extends TypeMap {
       private var hiddenSymbols: List[Symbol] = Nil
-      private val warnStructural = !owner.isLocalToBlock && settings.warnStructuralType && (tree match {
-        case tt: TypeTree => tt.wasEmpty // inferred type
-        case _ => false
-      })
 
       def check(tree: Tree): Tree = {
         import typer.TyperErrorGen._
@@ -1002,14 +998,6 @@ trait TypeDiagnostics extends splain.SplainDiagnostics {
               } else t
             case SingleType(_, sym) =>
               checkNoEscape(sym)
-              t
-            case rt: RefinedType if warnStructural =>
-              val warns = rt.decls.filter(_.isOnlyRefinementMember)
-              if (warns.nonEmpty)
-                context.warning(owner.pos,
-                  s"""$owner has an inferred structural type: ${owner.tpe}
-                     |  members that can be accessed with a reflective call: ${warns.mkString(",")}""".stripMargin,
-                  WarningCategory.LintStructuralType)
               t
             case _ =>
               t

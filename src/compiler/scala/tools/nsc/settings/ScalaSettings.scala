@@ -173,6 +173,7 @@ trait ScalaSettings extends StandardScalaSettings with Warnings { _: MutableSett
     val caseCompanionFunction  = Choice("case-companion-function", "Synthetic case companion objects no longer extend FunctionN. [bin]")
     val caseCopyByName         = Choice("case-copy-by-name", "Synthesize case copy method with by-name parameters. [bin]")
     val inferOverride          = Choice("infer-override", "Inferred type of member uses type of overridden member. [bin]")
+    val noInferStructural      = Choice("no-infer-structural", "Definitions with an inferred type never have a structural type. [bin]")
 
     // Other semantic changes
     val any2StringAdd          = Choice("any2stringadd", "Implicit `any2stringadd` is never inferred.")
@@ -201,6 +202,12 @@ trait ScalaSettings extends StandardScalaSettings with Warnings { _: MutableSett
       "v2.13.15",
       "v2.13.14 plus double-definitions",
       expandsTo = v13_15_choices)
+
+    val v13_17_choices = noInferStructural :: v13_15_choices
+    val v13_17 = Choice(
+      "v2.13.17",
+      "v2.13.15 plus no-infer-structural",
+      expandsTo = v13_17_choices)
   }
   val XsourceFeatures = MultiChoiceSetting(
     name = "-Xsource-features",

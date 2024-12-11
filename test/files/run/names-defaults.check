@@ -10,10 +10,6 @@ names-defaults.scala:324: warning: value p has an inferred structural type: Test
   members that can be accessed with a reflective call: val inner: this.Inner{def g: Int}
     val p = new P3207[Int] {
         ^
-names-defaults.scala:324: warning: value p has an inferred structural type: Test.P3207[Int]{val inner: this.Inner{def g: Int}}
-  members that can be accessed with a reflective call: def g: Int
-    val p = new P3207[Int] {
-        ^
 names-defaults.scala:359: warning: the parameter name y is deprecated: use b instead
   deprNam1(y = 10, a = 1)
              ^
