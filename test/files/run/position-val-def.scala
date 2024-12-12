@@ -20,7 +20,7 @@ object Test {
     var x, y = 0
     val (x, y) = 0
     """
-    val exprs = tests.split("\\n").map(_.trim).filterNot(_.isEmpty)
-    exprs foreach test
+    for (line <- tests.linesIterator; expr = line.trim if !expr.isEmpty)
+      test(expr)
   }
 }

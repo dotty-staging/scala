@@ -586,15 +586,18 @@ self =>
 
     def syntaxError(offset: Offset, msg: String, actions: List[CodeAction] = Nil): Unit
 
-    private def syntaxError(pos: Position, msg: String, skipIt: Boolean): Unit = syntaxError(pos, msg, skipIt, Nil)
+    private def syntaxError(pos: Position, msg: String, skipIt: Boolean): Unit =
+      syntaxError(pos, msg, skipIt, actions = Nil)
     private def syntaxError(pos: Position, msg: String, skipIt: Boolean, actions: List[CodeAction]): Unit =
       syntaxError(pos pointOrElse in.offset, msg, skipIt, actions)
 
-    def syntaxError(msg: String, skipIt: Boolean): Unit = syntaxError(msg, skipIt, Nil)
+    def syntaxError(msg: String, skipIt: Boolean): Unit =
+      syntaxError(msg, skipIt, actions = Nil)
     def syntaxError(msg: String, skipIt: Boolean, actions: List[CodeAction]): Unit =
       syntaxError(in.offset, msg, skipIt, actions)
 
-    def syntaxError(offset: Offset, msg: String, skipIt: Boolean): Unit = syntaxError(offset, msg, skipIt, Nil)
+    def syntaxError(offset: Offset, msg: String, skipIt: Boolean): Unit =
+      syntaxError(offset, msg, skipIt, actions = Nil)
     def syntaxError(offset: Offset, msg: String, skipIt: Boolean, actions: List[CodeAction]): Unit = {
       if (offset > lastErrorOffset) {
         syntaxError(offset, msg, actions)
@@ -604,8 +607,10 @@ self =>
         skip(UNDEF)
     }
 
-    def warning(msg: String, category: WarningCategory): Unit = warning(in.offset, msg, category, Nil)
-    def warning(msg: String, category: WarningCategory, actions: List[CodeAction]): Unit = warning(in.offset, msg, category, actions)
+    def warning(msg: String, category: WarningCategory): Unit =
+      warning(in.offset, msg, category, actions = Nil)
+    def warning(msg: String, category: WarningCategory, actions: List[CodeAction]): Unit =
+      warning(in.offset, msg, category, actions)
 
     def syntaxErrorOrIncomplete(msg: String, skipIt: Boolean, actions: List[CodeAction] = Nil): Unit = {
       if (in.token == EOF)
@@ -2904,7 +2909,7 @@ self =>
 
     private def caseAwareTokenOffset = if (in.token == CASECLASS || in.token == CASEOBJECT) in.prev.offset else in.offset
 
-    def nonLocalDefOrDcl : List[Tree] = {
+    def nonLocalDefOrDcl: List[Tree] = {
       val annots = annotations(skipNewLines = true)
       defOrDcl(caseAwareTokenOffset, modifiers() withAnnotations annots)
     }
@@ -2915,64 +2920,68 @@ self =>
      *  VarDef ::= PatDef | Id {`,` Id} `:` Type `=` `_`
      *  }}}
      */
-    def patDefOrDcl(pos : Int, mods: Modifiers): List[Tree] = {
-      var newmods = mods
+    def patDefOrDcl(start: Int, mods: Modifiers): List[Tree] = {
+      def mkDefs(mods: Modifiers, pat: Tree, tp: Tree, rhs: Tree, rhsPos: Position): List[Tree] = {
+        val pat1 = if (tp.isEmpty) pat else Typed(pat, tp).setPos(pat.pos union tp.pos)
+        val trees = makePatDef(mods, pat1, rhs, rhsPos)
+        val positioned = pat1 match {
+          case id @ Ident(_) => id
+          case Typed(id @ Ident(_), _) => id
+          case _ => EmptyTree
+        }
+        if (!positioned.isEmpty && trees.lengthCompare(1) == 0)
+          positioned.getAndRemoveAttachment[NamePos].foreach(trees.head.updateAttachment[NamePos](_))
+        if (mods.isDeferred)
+          trees match {
+            case ValDef(_, _, _, EmptyTree) :: Nil =>
+              if (mods.isLazy) syntaxError(pat.pos, "lazy values may not be abstract", skipIt = false)
+              else ()
+            case _ => syntaxError(pat.pos, "pattern definition may not be abstract", skipIt = false)
+          }
+        trees
+      }
+      // begin
       in.nextToken()
       checkKeywordDefinition()
-      val lhs = commaSeparated {
-        val start = in.offset
+      val lhs: List[Tree] = commaSeparated {
+        val nameStart = in.offset
         noSeq.pattern2() match {
           case t @ Ident(_) =>
-            val namePos = NamePos(r2p(start, start))
+            val namePos = NamePos(r2p(nameStart, nameStart))
             stripParens(t).updateAttachment(namePos)
           case t => stripParens(t)
         }
       }
       val tp = typedOpt()
-      val (rhs, rhsPos) =
-        if (!tp.isEmpty && in.token != EQUALS) {
-          newmods = newmods | Flags.DEFERRED
-          (EmptyTree, NoPosition)
-        } else {
+      val (rhs, rhsPos, newmods) =
+        if (!tp.isEmpty && in.token != EQUALS)
+          (EmptyTree, NoPosition, mods | Flags.DEFERRED)
+        else {
           accept(EQUALS)
           expr() match {
-            case x if !tp.isEmpty && newmods.isMutable && lhs.forall(_.isInstanceOf[Ident]) && isWildcard(x) =>
+            case x if !tp.isEmpty && mods.isMutable && lhs.forall(_.isInstanceOf[Ident]) && isWildcard(x) =>
               tp match {
                 case SingletonTypeTree(Literal(Constant(_))) =>
                   syntaxError(tp.pos, "default initialization prohibited for literal-typed vars", skipIt = false)
                 case _ =>
               }
               placeholderParams = placeholderParams.tail
-              newmods = newmods | Flags.DEFAULTINIT
-              (EmptyTree, x.pos)
-            case x => (x, x.pos)
+              (EmptyTree, x.pos, mods | Flags.DEFAULTINIT)
+            case x => (x, x.pos, mods)
           }
         }
-      def mkDefs(p: Tree, tp: Tree, rhs: Tree): List[Tree] = {
-        val trees = {
-          val pat = if (tp.isEmpty) p else Typed(p, tp) setPos (p.pos union tp.pos)
-          val ts = makePatDef(newmods, pat, rhs, rhsPos)
-          val positioned = pat match {
-            case id @ Ident(_) => id
-            case Typed(id @ Ident(_), _) => id
-            case _ => EmptyTree
-          }
-          if (!positioned.isEmpty && ts.lengthCompare(1) == 0)
-            positioned.getAndRemoveAttachment[NamePos].foreach(att => ts.head.updateAttachment[NamePos](att))
-          ts
+      def expandPatDefs(lhs: List[Tree], expansion: List[Tree]): List[Tree] =
+        lhs match {
+          case tree :: Nil =>
+            expansion ::: mkDefs(newmods, tree, tp, rhs, rhsPos) // reuse tree on last (or only) expansion
+          case tree :: lhs =>
+            val ts = mkDefs(newmods, tree, tp.duplicate, rhs.duplicate, rhsPos)
+            expandPatDefs(lhs, expansion = expansion ::: ts)
+          case x => throw new MatchError(x) // lhs must not be empty
         }
-        if (newmods.isDeferred) {
-          trees match {
-            case List(ValDef(_, _, _, EmptyTree)) =>
-              if (mods.isLazy) syntaxError(p.pos, "lazy values may not be abstract", skipIt = false)
-            case _ => syntaxError(p.pos, "pattern definition may not be abstract", skipIt = false)
-          }
-        }
-        trees
-      }
-      val trees = lhs.toList.init.flatMap(mkDefs(_, tp.duplicate, rhs.duplicate)) ::: mkDefs(lhs.last, tp, rhs)
+      val trees = expandPatDefs(lhs, expansion = Nil)
       val hd = trees.head
-      hd.setPos(hd.pos.withStart(pos))
+      hd.setPos(hd.pos.withStart(start))
       ensureNonOverlapping(hd, trees.tail)
       if (trees.lengthCompare(1) > 0) trees.foreach(_.updateAttachment(MultiDefAttachment))
       trees
