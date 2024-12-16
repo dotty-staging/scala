@@ -774,8 +774,9 @@ abstract class TreeGen {
 
   private def mkPatDef(mods: Modifiers, pat: Tree, rhs: Tree, rhsPos: Position, forFor: Boolean)(implicit fresh: FreshNameCreator): List[ValDef] = matchVarPattern(pat) match {
     case Some((name, tpt)) =>
-      atPos(pat.pos union rhsPos) {
+      atPos(pat.pos | rhsPos) {
         ValDef(mods, name.toTermName, tpt, rhs)
+          .updateAttachment(NamePos(pat.pos))
           .tap(vd =>
               if (forFor) propagatePatVarDefAttachments(pat, vd)
               else propagateNoWarnAttachment(pat, vd))
@@ -805,7 +806,7 @@ abstract class TreeGen {
         case Typed(expr, tpt) if !expr.isInstanceOf[Ident] =>
           val rhsTypedUnchecked =
             if (tpt.isEmpty) rhsUnchecked
-            else Typed(rhsUnchecked, tpt) setPos (rhsPos union tpt.pos)
+            else Typed(rhsUnchecked, tpt).setPos(rhsPos | tpt.pos)
           (expr, rhsTypedUnchecked)
         case ok =>
           (ok, rhsUnchecked)
@@ -821,9 +822,10 @@ abstract class TreeGen {
           ))
       }
       vars match {
-        case List((vname, tpt, pos, original)) =>
-          atPos(pat.pos union pos union rhsPos) {
+        case (vname, tpt, pos, original) :: Nil =>
+          atPos(pat.pos | pos | rhsPos) {
             ValDef(mods, vname.toTermName, tpt, matchExpr)
+              .updateAttachment(NamePos(pos))
               .tap(propagatePatVarDefAttachments(original, _))
           } :: Nil
         case _ =>
@@ -841,7 +843,8 @@ abstract class TreeGen {
           var cnt = 0
           val restDefs = for ((vname, tpt, pos, original) <- vars) yield atPos(pos) {
             cnt += 1
-            ValDef(mods, vname.toTermName, tpt, Select(Ident(tmp), TermName("_" + cnt)))
+            ValDef(mods, vname.toTermName, tpt, Select(Ident(tmp), TermName(s"_$cnt")))
+              .updateAttachment(NamePos(pos))
               .tap(propagatePatVarDefAttachments(original, _))
           }
           firstDef :: restDefs

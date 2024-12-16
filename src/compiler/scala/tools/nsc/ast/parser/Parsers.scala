@@ -2921,16 +2921,11 @@ self =>
      *  }}}
      */
     def patDefOrDcl(start: Int, mods: Modifiers): List[Tree] = {
-      def mkDefs(mods: Modifiers, pat: Tree, tp: Tree, rhs: Tree, rhsPos: Position): List[Tree] = {
-        val pat1 = if (tp.isEmpty) pat else Typed(pat, tp).setPos(pat.pos union tp.pos)
+      def mkDefs(mods: Modifiers, pat: Tree, tp: Tree, rhs: Tree, rhsPos: Position, defPos: Position): List[Tree] = {
+        val pat1 = if (tp.isEmpty) pat else Typed(pat, tp).setPos(pat.pos | tp.pos)
         val trees = makePatDef(mods, pat1, rhs, rhsPos)
-        val positioned = pat1 match {
-          case id @ Ident(_) => id
-          case Typed(id @ Ident(_), _) => id
-          case _ => EmptyTree
-        }
-        if (!positioned.isEmpty && trees.lengthCompare(1) == 0)
-          positioned.getAndRemoveAttachment[NamePos].foreach(trees.head.updateAttachment[NamePos](_))
+        val defs = if (trees.lengthCompare(1) == 0) trees else trees.tail
+        defs.foreach(d => d.setPos(defPos.withPoint(d.pos.start).makeTransparent))
         if (mods.isDeferred)
           trees match {
             case ValDef(_, _, _, EmptyTree) :: Nil =>
@@ -2970,20 +2965,23 @@ self =>
             case x => (x, x.pos, mods)
           }
         }
+      // each valdef gets transparent defPos with point at name and NamePos
+      val lhsPos = wrappingPos(lhs)
+      val defPos = {
+        if (lhsPos.isRange) lhsPos.withStart(start).withEnd(in.lastOffset)
+        else o2p(start)
+      }
       def expandPatDefs(lhs: List[Tree], expansion: List[Tree]): List[Tree] =
         lhs match {
-          case tree :: Nil =>
-            expansion ::: mkDefs(newmods, tree, tp, rhs, rhsPos) // reuse tree on last (or only) expansion
-          case tree :: lhs =>
-            val ts = mkDefs(newmods, tree, tp.duplicate, rhs.duplicate, rhsPos)
+          case pat :: Nil =>
+            expansion ::: mkDefs(newmods, pat, tp, rhs, rhsPos, defPos) // reuse tree on last (or only) expansion
+          case pat :: lhs =>
+            val ts = mkDefs(newmods, pat, tp.duplicate, rhs.duplicate, rhsPos, defPos)
             expandPatDefs(lhs, expansion = expansion ::: ts)
           case x => throw new MatchError(x) // lhs must not be empty
         }
       val trees = expandPatDefs(lhs, expansion = Nil)
-      val hd = trees.head
-      hd.setPos(hd.pos.withStart(start))
-      ensureNonOverlapping(hd, trees.tail)
-      if (trees.lengthCompare(1) > 0) trees.foreach(_.updateAttachment(MultiDefAttachment))
+      if (trees.lengthCompare(1) > 0) trees.foreach(_.updateAttachment[MultiDefAttachment.type](MultiDefAttachment))
       trees
     }
 

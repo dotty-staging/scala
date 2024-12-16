@@ -133,9 +133,11 @@ private final class SingleAttachment[P >: Null](override val pos: P, val att: An
   override def all = Set.empty[Any] + att
   override def contains[T](implicit tt: ClassTag[T]) = tt.runtimeClass.isInstance(att)
   override def get[T](implicit tt: ClassTag[T]) = if (contains(tt)) Some(att.asInstanceOf[T]) else None
-  override def update[T](newAtt: T)(implicit tt: ClassTag[T]) =
+  override def update[T](newAtt: T)(implicit tt: ClassTag[T]) = {
+    //assert(tt ne classTag[Any])
     if (contains(tt)) new SingleAttachment[P](pos, newAtt)
     else new NonemptyAttachments[P](pos, Set.empty[Any] + att + newAtt)
+  }
   override def remove[T](implicit tt: ClassTag[T]) =
     if (contains(tt)) pos.asInstanceOf[Attachments { type Pos = P }] else this
   override def toString = s"SingleAttachment at $pos: $att"
