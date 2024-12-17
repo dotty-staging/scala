@@ -136,24 +136,44 @@ trait Implicits extends splain.SplainData {
         }
       }
       if (settings.lintImplicitRecursion) {
-        val s =
+        val target =
           if (rts.isAccessor) rts.accessed
           else if (rts.isModule) rts.moduleClass
           else rts
         val rtsIsImplicitWrapper = isView && rts.isMethod && rts.isSynthetic && rts.isImplicit
         def isSelfEnrichment(encl: Symbol): Boolean =
           tree.symbol.isParamAccessor && tree.symbol.owner == encl && !encl.isDerivedValueClass
-        def targetsUniversalMember(encl: Symbol): Boolean = cond(pt) {
+        def targetsUniversalMember(target: => Type): Boolean = cond(pt) {
           case TypeRef(pre, sym, _ :: RefinedType(WildcardType :: Nil, decls) :: Nil) =>
             sym == FunctionClass(1) &&
-            decls.exists(d => d.isMethod && d.info == WildcardType && isUniversalMember(encl.info.member(d.name)))
+            decls.exists(d => d.isMethod && d.info == WildcardType && isUniversalMember(target.member(d.name)))
         }
-        if (s != NoSymbol)
+        def targetsImplicitWrapper(encl: Symbol): Boolean =
+          encl.owner == rts.owner && encl.isClass && encl.isImplicit && encl.name == rts.name.toTypeName
+        if (target != NoSymbol)
           context.owner.ownersIterator
-           .find(encl => encl == s || rtsIsImplicitWrapper &&
-              encl.owner == rts.owner && encl.isClass && encl.isImplicit && encl.name == rts.name.toTypeName) match {
-            case Some(encl) if !encl.isClass || encl.isModuleClass || isSelfEnrichment(encl) || targetsUniversalMember(encl) =>
-              context.warning(result.tree.pos, s"Implicit resolves to enclosing $encl", WFlagSelfImplicit)
+          .find(encl => encl == target || rtsIsImplicitWrapper && targetsImplicitWrapper(encl)) match {
+            case Some(encl) =>
+              var doWarn = false
+              var help = ""
+              if (!encl.isClass) {
+                doWarn = true
+                if (encl.isMethod && targetsUniversalMember(encl.info.finalResultType))
+                  help = s"; the conversion adds a member of AnyRef to ${tree.symbol}"
+              }
+              else if (encl.isModuleClass) {
+                doWarn = true
+              }
+              else if (isSelfEnrichment(encl)) {
+                doWarn = true
+                help = s"; the enrichment wraps ${tree.symbol}"
+              }
+              else if (targetsUniversalMember(encl.info)) {
+                doWarn = true
+                help = s"; the conversion adds a member of AnyRef to ${tree.symbol}"
+              }
+              if (doWarn)
+                context.warning(result.tree.pos, s"Implicit resolves to enclosing $encl$help", WFlagSelfImplicit)
             case _ =>
           }
       }
