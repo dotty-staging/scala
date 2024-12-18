@@ -2,7 +2,7 @@ import scala.tools.partest.DirectTest
 
 object Test extends DirectTest {
 
-  override def extraSettings: String = "-usejavacp -Vprint:parser -Vprint-pos -Yrangepos -Ystop-after:parser"
+  override def extraSettings: String = "-usejavacp -Vprint:parser -Vprint-pos -Ystop-after:parser"
 
   override def code = """
     trait Greeting {
