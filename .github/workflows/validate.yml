@@ -1,0 +1,30 @@
+name: PR validation
+on:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 8
+          cache: sbt
+      - name: Setup SBT
+        uses: sbt/setup-sbt@v1
+      # "mini" bootstrap for PR validation
+      # "mini" in these senses:
+      # - it doesn't use the complicated legacy scripts.
+      # - it doesn't publish to scala-pr-validation-snapshots
+      #   (because we need secrets for that and PRs from forks can't have secrets)
+      # it is still a true bootstrap.
+      - name: Stage 1
+        run: sbt -warn setupPublishCore generateBuildCharacterPropertiesFile headerCheck publishLocal
+      - name: Stage 2
+        run: |
+          STARR=`cat buildcharacter.properties | grep ^maven.version.number | cut -d= -f2` && echo $STARR
+          sbt -Dstarr.version=$STARR -warn setupValidateTest Test/compile info testAll

@@ -30,20 +30,6 @@ jobs:
           - buildQuick
           - triggerScalaDist
 
-      # pull request validation (w/ mini-bootstrap)
-      # "mini" in these senses:
-      # - it doesn't use the complicated legacy scripts.
-      # - it doesn't publish to scala-pr-validation-snapshots
-      #   (because we need secrets for that and Travis-CI doesn't give PR jobs access to secrets)
-      # it is still a true bootstrap.
-      - stage: build
-        name: "JDK 8 pr validation"
-        if: type = pull_request
-        script:
-          - sbt -warn setupPublishCore generateBuildCharacterPropertiesFile headerCheck publishLocal
-          - STARR=`cat buildcharacter.properties | grep ^maven.version.number | cut -d= -f2` && echo $STARR
-          - sbt -Dstarr.version=$STARR -warn setupValidateTest test:compile info testAll
-
       # build the spec using jekyll
       - stage: build
         if: type != pull_request
