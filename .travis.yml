@@ -46,6 +46,7 @@ jobs:
 
       # build the spec using jekyll
       - stage: build
+        if: type != pull_request
         dist: focal
         language: ruby
         # ruby 3.x is default, need to upgrade jekyll. using 2.7 for now.
@@ -56,10 +57,10 @@ jobs:
           - bundler --version
           - bundle install
         script:
-        - 'if [ "$TRAVIS_PULL_REQUEST" = "false" ]; then (cd admin && ./init.sh); fi'
+        - '(cd admin && ./init.sh)'
         - bundle exec jekyll build -s spec/ -d build/spec
         after_success:
-        - 'if [ "$TRAVIS_PULL_REQUEST" = "false" ]; then ./scripts/travis-publish-spec.sh; fi'
+        - ./scripts/travis-publish-spec.sh
 
 env:
   global:
