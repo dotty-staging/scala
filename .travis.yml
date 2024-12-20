@@ -30,22 +30,9 @@ jobs:
           - buildQuick
           - triggerScalaDist
 
-      # pull request validation (w/ mini-bootstrap)
-      # "mini" in these senses:
-      # - it doesn't use the complicated legacy scripts.
-      # - it doesn't publish to scala-pr-validation-snapshots
-      #   (because we need secrets for that and Travis-CI doesn't give PR jobs access to secrets)
-      # it is still a true bootstrap.
-      - stage: build
-        name: "JDK 8 pr validation"
-        if: type = pull_request
-        script:
-          - sbt -warn setupPublishCore generateBuildCharacterPropertiesFile headerCheck publishLocal
-          - STARR=`cat buildcharacter.properties | grep ^maven.version.number | cut -d= -f2` && echo $STARR
-          - sbt -Dstarr.version=$STARR -warn setupValidateTest test:compile info testAll
-
       # build the spec using jekyll
       - stage: build
+        if: type != pull_request
         dist: focal
         language: ruby
         # ruby 3.x is default, need to upgrade jekyll. using 2.7 for now.
@@ -56,10 +43,10 @@ jobs:
           - bundler --version
           - bundle install
         script:
-        - 'if [ "$TRAVIS_PULL_REQUEST" = "false" ]; then (cd admin && ./init.sh); fi'
+        - '(cd admin && ./init.sh)'
         - bundle exec jekyll build -s spec/ -d build/spec
         after_success:
-        - 'if [ "$TRAVIS_PULL_REQUEST" = "false" ]; then ./scripts/travis-publish-spec.sh; fi'
+        - ./scripts/travis-publish-spec.sh
 
 env:
   global:
