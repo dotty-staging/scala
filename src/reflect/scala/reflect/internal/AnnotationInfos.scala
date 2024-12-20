@@ -202,6 +202,27 @@ trait AnnotationInfos extends api.Annotations { self: SymbolTable =>
     def args: List[Tree]
     def assocs: List[(Name, ClassfileAnnotArg)]
 
+    /**
+     * Obtain the constructor symbol that was used for this annotation.
+     * If the annotation does not have secondary constructors, use `atp.typeSymbol.primaryConstructor` instead.
+     *
+     * To use this method in a compiler plugin, invoke it as follows:
+     * `val sym = annotationInfo.constructorSymbol(tree => global.exitingTyper(global.typer.typed(tree)))`
+     *
+     * Annotation arguments can be paired with the corresponding annotation parameters:
+     * `sym.paramss.head.zip(annotationInfo.args): List[(Symbol, Tree)]`
+     *
+     * Background: Before type checking, `@ann(x)` is represented as a tree `Apply(Select(New(ann), <init>), x)`.
+     * That tree is type checked as such and the resulting typed tree is used to build the `AnnotationInfo`.
+     * The information which constructor symbol was used is not represented in the `AnnoationInfo`.
+     * Adding it would be difficult because it affects the pickle format.
+     */
+    def constructorSymbol(typer: Tree => Tree): Symbol = {
+      typer(New(atp, args: _*)) match {
+        case Apply(constr @ Select(New(_), nme.CONSTRUCTOR), _) => constr.symbol
+        case _ => atp.typeSymbol.primaryConstructor
+      }
+    }
     def tpe = atp
     def scalaArgs = args
     def javaArgs = ListMap(assocs: _*)
