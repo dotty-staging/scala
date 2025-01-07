@@ -125,7 +125,7 @@ jobs:
         - sbt bench/Jmh/compile
 
     - stage: build
-      if: type = pull_request OR type = push
+      if: type != pull_request
       name: language spec
       dist: focal
       language: ruby
