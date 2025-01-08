@@ -2,12 +2,13 @@ import scala.tools.partest.ReplTest
 
 object Test extends ReplTest {
   override def code =
-    """import annotation.Annotation
-      |class ann(x: Int = 0, y: Int = 0) extends Annotation
-      |class naa(x: Int = 0, y: Int = 0) extends Annotation {
+    """import annotation._
+      |class ann(x: Int = 1, y: Int = 2) extends Annotation
+      |class naa(x: Int = 1, y: Int = 2) extends Annotation {
       |  def this(s: String) = this(1, 2)
       |}
-      |class mul(x: Int = 0, y: Int = 0)(z: Int = 0, zz: Int = 0) extends Annotation
+      |class mul(x: Int = 1, y: Int = 2)(z: Int = 3, zz: Int = 4) extends Annotation
+      |class kon(x: Int = 1, y: Int = 2) extends ConstantAnnotation
       |class C {
       |  val a = 1
       |  val b = 2
@@ -26,10 +27,19 @@ object Test extends ReplTest {
       |  @mul(y = b)(a, b) def m8 = 1
       |  @mul(y = b, x = a)(zz = b) def m9 = 1
       |  @mul(y = b)(zz = b) def m10 = 1
+      |
+      |  @kon(y = 22) def m11 = 1
+      |  @kon(11) def m12 = 1
       |}
       |:power
       |println(typeOf[C].members.toList.filter(_.name.startsWith("m")).sortBy(_.name).map(_.annotations).mkString("\n"))
-      |val i = typeOf[C].member(TermName("m6")).annotations.head
-      |i.constructorSymbol(global.typer.typed).paramss
+      |val i6 = typeOf[C].member(TermName("m6")).annotations.head
+      |i6.constructorSymbol(global.typer.typed).paramss
+      |val i11 = typeOf[C].member(TermName("m11")).annotations.head
+      |i11.assocs
+      |i11.assocsWithDefaults
+      |val i3 = typeOf[C].member(TermName("m3")).annotations.head
+      |i3.args.map(_.tpe)
+      |i3.args.map(i3.argIsDefault)
       |""".stripMargin
 }

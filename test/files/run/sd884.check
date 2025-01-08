@@ -1,17 +1,20 @@
 
-scala> import annotation.Annotation
-import annotation.Annotation
+scala> import annotation._
+import annotation._
 
-scala> class ann(x: Int = 0, y: Int = 0) extends Annotation
+scala> class ann(x: Int = 1, y: Int = 2) extends Annotation
 class ann
 
-scala> class naa(x: Int = 0, y: Int = 0) extends Annotation {
+scala> class naa(x: Int = 1, y: Int = 2) extends Annotation {
   def this(s: String) = this(1, 2)
 }
 class naa
 
-scala> class mul(x: Int = 0, y: Int = 0)(z: Int = 0, zz: Int = 0) extends Annotation
+scala> class mul(x: Int = 1, y: Int = 2)(z: Int = 3, zz: Int = 4) extends Annotation
 class mul
+
+scala> class kon(x: Int = 1, y: Int = 2) extends ConstantAnnotation
+class kon
 
 scala> class C {
   val a = 1
@@ -31,6 +34,9 @@ scala> class C {
   @mul(y = b)(a, b) def m8 = 1
   @mul(y = b, x = a)(zz = b) def m9 = 1
   @mul(y = b)(zz = b) def m10 = 1
+
+  @kon(y = 22) def m11 = 1
+  @kon(11) def m12 = 1
 }
          @mul(a, b)(a, b) def m7 = 1
           ^
@@ -43,11 +49,11 @@ On line 16: warning: Implementation limitation: multiple argument lists on annot
          @mul(y = b, x = a)(zz = b) def m9 = 1
           ^
 On line 17: warning: Implementation limitation: multiple argument lists on annotations are
-       currently not supported; ignoring arguments List(mul.<init>$default$3(C.this.a, C.this.b), C.this.b)
+       currently not supported; ignoring arguments List(3, C.this.b)
          @mul(y = b)(zz = b) def m10 = 1
           ^
 On line 18: warning: Implementation limitation: multiple argument lists on annotations are
-       currently not supported; ignoring arguments List(mul.<init>$default$3(mul.<init>$default$1, C.this.b), C.this.b)
+       currently not supported; ignoring arguments List(3, C.this.b)
 class C
 
 scala> :power
@@ -57,20 +63,40 @@ Try :help or completions for vals._ and power._
 
 scala> println(typeOf[C].members.toList.filter(_.name.startsWith("m")).sortBy(_.name).map(_.annotations).mkString("\n"))
 List(ann(C.this.a, C.this.b))
-List(mul($line15.$read.INSTANCE.$iw.mul.<init>$default$1, C.this.b))
-List(ann(C.this.a, $line13.$read.INSTANCE.$iw.ann.<init>$default$2))
-List(ann($line13.$read.INSTANCE.$iw.ann.<init>$default$1, C.this.b))
+List(mul(1, C.this.b))
+List(kon(y = 22))
+List(kon(x = 11))
+List(ann(C.this.a, 2))
+List(ann(1, C.this.b))
 List(naa(C.this.a, C.this.b))
 List(naa(C.this.a, C.this.b))
 List(naa(""))
 List(mul(C.this.a, C.this.b))
-List(mul($line15.$read.INSTANCE.$iw.mul.<init>$default$1, C.this.b))
+List(mul(1, C.this.b))
 List(mul(C.this.a, C.this.b))
 
-scala> val i = typeOf[C].member(TermName("m6")).annotations.head
-val i: $r.intp.global.AnnotationInfo = naa("")
+scala> val i6 = typeOf[C].member(TermName("m6")).annotations.head
+val i6: $r.intp.global.AnnotationInfo = naa("")
 
-scala> i.constructorSymbol(global.typer.typed).paramss
+scala> i6.constructorSymbol(global.typer.typed).paramss
 val res1: List[List[$r.intp.global.Symbol]] = List(List(value s))
+
+scala> val i11 = typeOf[C].member(TermName("m11")).annotations.head
+val i11: $r.intp.global.AnnotationInfo = kon(y = 22)
+
+scala> i11.assocs
+val res2: List[($r.intp.global.Name, $r.intp.global.ClassfileAnnotArg)] = List((y,22))
+
+scala> i11.assocsWithDefaults
+val res3: List[($r.intp.global.Name, $r.intp.global.ClassfileAnnotArg)] = List((x,1), (y,22))
+
+scala> val i3 = typeOf[C].member(TermName("m3")).annotations.head
+val i3: $r.intp.global.AnnotationInfo = ann(1, C.this.b)
+
+scala> i3.args.map(_.tpe)
+val res4: List[$r.intp.global.Type] = List(Int(1) @scala.annotation.meta.defaultArg, Int)
+
+scala> i3.args.map(i3.argIsDefault)
+val res5: List[Boolean] = List(true, false)
 
 scala> :quit

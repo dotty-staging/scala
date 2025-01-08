@@ -181,30 +181,63 @@ trait AnnotationInfos extends api.Annotations { self: SymbolTable =>
     override def symbol: Symbol = if (forced) super.symbol else typeSymbol
   }
 
-  /** Typed information about an annotation. It can be attached to either
-   *  a symbol or an annotated type.
+  /**
+   * Typed information about an annotation. It can be attached to either a symbol or an annotated type.
    *
-   *  Annotations are written to the classfile as Java annotations
-   *  if `atp` conforms to `ClassfileAnnotation` (the classfile parser adds
-   *  this interface to any Java annotation class).
+   * `atp` is the type of the annotation class, the `symbol` method returns its [[Symbol]].
    *
-   *  Annotations are pickled (written to scala symtab attribute in the
-   *  classfile) if `atp` inherits form `StaticAnnotation`.
+   * If `atp` conforms to `ConstantAnnotation` (which is true for annotations defined in Java), the annotation
+   * arguments are compile-time constants represented in `assocs`. Note that default arguments are *not* present
+   * in `assocs`. The `assocsWithDefaults` extends `assocs` with the default values from the annotation definition.
+   * Example: `class a(x: Int = 1) extends ConstantAnnotation`.F or `@ann()` without arguments `assocsWithDefaults`
+   * contains `x -> 1`.
    *
-   *  `args` stores arguments to Scala annotations, represented as typed
-   *  trees. Note that these trees are not transformed by any phases
-   *  following the type-checker.
+   * If `atp` is not a `ConstantAnnotation`, the annotation arguments are represented as type trees in `args`.
+   * These trees are not transformed by any phases following the type-checker.
+   * Note that default arguments are inserted into the `args` list. Example: `class a(x: Int = 1) extends Annotation`.
+   * For `@ann()` without arguments, `args` is `List(1)`.
+   * The `argIsDefault` method tells if an annotation argument is explicit or a default inserted by the compiler.
    *
-   *  `assocs` stores arguments to classfile annotations as name-value pairs.
+   *  Annotations are written to the classfile as Java annotations if `atp` conforms to `ClassfileAnnotation`
+   *  (the classfile parser adds this interface to any Java annotation class).
+   *
+   *  Annotations are pickled (written to scala symtab attribute in the classfile) if `atp` inherits from
+   *  `StaticAnnotation`, such annotations are visible under separate compilation.
    */
   abstract class AnnotationInfo extends AnnotationApi {
     def atp: Type
     def args: List[Tree]
     def assocs: List[(Name, ClassfileAnnotArg)]
 
+    /** See [[AnnotationInfo]] */
+    def argIsDefault(arg: Tree): Boolean = arg match {
+      case NamedArg(_, a) => argIsDefault(a)
+      case treeInfo.Applied(fun, _, _) if fun.symbol != null && fun.symbol.isDefaultGetter =>
+        // if the annotation class was compiled with an old compiler, parameters with defaults don't have a
+        // `@defaultArg` meta-annotation and the typer inserts a call to the default getter
+        true
+      case _ =>
+        // When inserting defaults, the tpe of the argument tree is tagged with the `@defaultArg` annotation.
+        arg.tpe.hasAnnotation(DefaultArgAttr)
+    }
+
+    /** See [[AnnotationInfo]]. Note: for Java-defined annotations, this method returns `Nil`. */
+    def assocsWithDefaults: List[(Name, ClassfileAnnotArg)] = {
+      val explicit = assocs.toMap
+      // ConstantAnnotations cannot have auxiliary constructors, nor multiple parameter lists
+      val params = atp.typeSymbol.primaryConstructor.paramss.headOption.getOrElse(Nil)
+      params.flatMap(p => {
+        val arg = explicit.get(p.name).orElse(
+          p.getAnnotation(DefaultArgAttr).flatMap(_.args.headOption).collect {
+            case Literal(c) => LiteralAnnotArg(c)
+          })
+        arg.map(p.name -> _)
+      })
+    }
+
     /**
      * Obtain the constructor symbol that was used for this annotation.
-     * If the annotation does not have secondary constructors, use `atp.typeSymbol.primaryConstructor` instead.
+     * If the annotation does not have secondary constructors, use `symbol.primaryConstructor` instead.
      *
      * To use this method in a compiler plugin, invoke it as follows:
      * `val sym = annotationInfo.constructorSymbol(tree => global.exitingTyper(global.typer.typed(tree)))`
@@ -223,6 +256,7 @@ trait AnnotationInfos extends api.Annotations { self: SymbolTable =>
         case _ => atp.typeSymbol.primaryConstructor
       }
     }
+
     def tpe = atp
     def scalaArgs = args
     def javaArgs = ListMap(assocs: _*)

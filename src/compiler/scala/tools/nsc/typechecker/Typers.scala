@@ -2149,6 +2149,8 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
           } else tpt1.tpe
           transformedOrTyped(vdef.rhs, EXPRmode | BYVALmode, tpt2)
         }
+      if (!isPastTyper && sym.hasDefault && sym.owner.isConstructor && sym.enclClass.isNonBottomSubClass(AnnotationClass))
+        sym.addAnnotation(AnnotationInfo(DefaultArgAttr.tpe, List(duplicateAndResetPos.transform(rhs1)), Nil))
       val vdef1 = treeCopy.ValDef(vdef, typedMods, sym.name, tpt1, checkDead(context, rhs1)) setType NoType
       if (sym.isSynthetic && sym.name.startsWith(nme.RIGHT_ASSOC_OP_PREFIX))
         rightAssocValDefs += ((sym, vdef1.rhs))
@@ -4057,6 +4059,8 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
           }
         }
 
+        // Usually, defaults are the default expression ASTs, but only for annotations compiled with a recent compiler
+        // that have `annotation.meta.defaultArg` meta annotations on them.
         def isDefaultArg(tree: Tree) = tree match {
           case treeInfo.Applied(fun, _, _) => fun.symbol != null && fun.symbol.isDefaultGetter
           case _ => false

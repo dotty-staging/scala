@@ -56,6 +56,9 @@ object MimaFilters extends AutoPlugin {
     ProblemFilters.exclude[IncompatibleResultTypeProblem]("scala.collection.immutable.LazyList#LazyBuilder#DeferredState.eval"),
     ProblemFilters.exclude[MissingClassProblem]("scala.collection.immutable.LazyList$MidEvaluation$"),
     ProblemFilters.exclude[MissingClassProblem]("scala.collection.immutable.LazyList$Uninitialized$"),
+
+    // scala/scala#10976
+    ProblemFilters.exclude[MissingClassProblem]("scala.annotation.meta.defaultArg"),
   )
 
   override val buildSettings = Seq(
