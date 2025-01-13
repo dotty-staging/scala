@@ -59,6 +59,8 @@ object MimaFilters extends AutoPlugin {
 
     // scala/scala#10976
     ProblemFilters.exclude[MissingClassProblem]("scala.annotation.meta.defaultArg"),
+    ProblemFilters.exclude[MissingClassProblem]("scala.annotation.meta.superArg"),
+    ProblemFilters.exclude[MissingClassProblem]("scala.annotation.meta.superFwdArg"),
   )
 
   override val buildSettings = Seq(

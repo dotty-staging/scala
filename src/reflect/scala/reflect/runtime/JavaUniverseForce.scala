@@ -482,6 +482,8 @@ trait JavaUniverseForce { self: runtime.JavaUniverse  =>
     definitions.SerialVersionUIDAttr
     definitions.SerialVersionUIDAnnotation
     definitions.SpecializedClass
+    definitions.SuperArgAttr
+    definitions.SuperFwdArgAttr
     definitions.ThrowsClass
     definitions.TransientAttr
     definitions.UncheckedClass

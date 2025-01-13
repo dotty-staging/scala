@@ -2356,6 +2356,42 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
         // we only have to move annotations around for accessors -- see annotSig as used by AccessorTypeCompleter and ValTypeCompleter
         if (meth.isAccessor) meth.filterAnnotations(_ != UnmappableAnnotation)
 
+        if (meth.isPrimaryConstructor && !isPastTyper) {
+          // add `@superArg` / `@superFwdArg` to subclasses of concrete annotations, e.g.,
+          // `@superArg("value", "cat=deprecation")` for `class nodep extends nowarn("cat=deprecation")`
+          // this is done by duplicating the untyped super arguments before type checking the super call, because the
+          // super call can be transformed by named/default arguments. to build the `@superArg` annotations, the super
+          // call is type checked using `typedAnnotation`, which uses Mode.ANNOTmode.
+          def superArgs(t: Tree): List[Tree] = t match {
+            case treeInfo.Application(fn, _, List(args)) => args.map(_.duplicate)
+            case Block(_ :+ superCall, _) => superArgs(superCall)
+            case _ => Nil
+          }
+          val cls = meth.enclClass
+          val supCls = cls.superClass
+          if (!supCls.isAbstract && supCls.isNonBottomSubClass(AnnotationClass)) {
+            val superAnnotArgs = superArgs(ddef.rhs)
+            if (superAnnotArgs.nonEmpty && supCls.primaryConstructor.paramss.size == 1)
+              silent(_.typedAnnotation(New(cls.info.parents.head, superAnnotArgs: _*), None)).map(i => {
+                if (supCls.isNonBottomSubClass(ConstantAnnotationClass)) {
+                  i.assocs.foreach {
+                    case (p, LiteralAnnotArg(arg)) =>
+                      cls.addAnnotation(AnnotationInfo(SuperArgAttr.tpe, List(CODE.LIT.typed(p.toString), CODE.LIT.typed(arg.value)), Nil))
+                    case _ =>
+                  }
+                } else {
+                  val ps = vparamss1.headOption.getOrElse(Nil).map(_.symbol).toSet
+                  i.symbol.primaryConstructor.paramss.headOption.getOrElse(Nil).zip(i.args).foreach {
+                    case (p, arg) if ps(arg.symbol) =>
+                      cls.addAnnotation(AnnotationInfo(SuperFwdArgAttr.tpe, List(CODE.LIT.typed(p.name.toString), CODE.LIT.typed(arg.symbol.name.toString)), Nil))
+                    case (p, arg) =>
+                      cls.addAnnotation(AnnotationInfo(SuperArgAttr.tpe, List(CODE.LIT.typed(p.name.toString), arg), Nil))
+                  }
+                }
+              })
+          }
+        }
+
         for (vparams1 <- vparamss1; vparam1 <- vparams1 dropRight 1)
           if (isRepeatedParamType(vparam1.symbol.tpe))
             StarParamNotLastError(vparam1)

@@ -1353,6 +1353,8 @@ trait Definitions extends api.StandardDefinitions {
     lazy val SerialVersionUIDAttr       = requiredClass[scala.SerialVersionUID]
     lazy val SerialVersionUIDAnnotation = AnnotationInfo(SerialVersionUIDAttr.tpe, List(), List(nme.value -> LiteralAnnotArg(Constant(0))))
     lazy val SpecializedClass           = requiredClass[scala.specialized]
+    lazy val SuperArgAttr               = getClassIfDefined("scala.annotation.meta.superArg")
+    lazy val SuperFwdArgAttr            = getClassIfDefined("scala.annotation.meta.superFwdArg")
     lazy val ThrowsClass                = requiredClass[scala.throws[_]]
     lazy val TransientAttr              = requiredClass[scala.transient]
     lazy val UncheckedClass             = requiredClass[scala.unchecked]

@@ -225,7 +225,7 @@ trait AnnotationInfos extends api.Annotations { self: SymbolTable =>
     def assocsWithDefaults: List[(Name, ClassfileAnnotArg)] = {
       val explicit = assocs.toMap
       // ConstantAnnotations cannot have auxiliary constructors, nor multiple parameter lists
-      val params = atp.typeSymbol.primaryConstructor.paramss.headOption.getOrElse(Nil)
+      val params = symbol.primaryConstructor.paramss.headOption.getOrElse(Nil)
       params.flatMap(p => {
         val arg = explicit.get(p.name).orElse(
           p.getAnnotation(DefaultArgAttr).flatMap(_.args.headOption).collect {
@@ -234,6 +234,66 @@ trait AnnotationInfos extends api.Annotations { self: SymbolTable =>
         arg.map(p.name -> _)
       })
     }
+
+    /**
+     * The `assocs` of this annotation passed to the `parent` class.
+     *
+     * `parent` needs to be either the annotation class itself or its direct superclass.
+     *
+     * If `parent` is the superclass, this method returns the arguments passed at the annotation definition.
+     *
+     * Example:given `class nodep extends nowarn("cat=deprecation")`, the call `assocsForSuper(NowarnClassSymbol)`
+     * returns `List('value' -> "cat=deprecation")`.
+     */
+    def assocsForSuper(parent: Symbol): List[(Name, ClassfileAnnotArg)] =
+      if (symbol == parent) assocs
+      else if (symbol.superClass == parent) {
+        val superConstArgs: Map[String, ClassfileAnnotArg] = symbol.annotations.filter(_.matches(SuperArgAttr)).flatMap(_.args match {
+          case List(Literal(param), Literal(value)) => Some(param.stringValue -> LiteralAnnotArg(value))
+          case _ => None
+        }).toMap
+        parent.primaryConstructor.paramss.headOption.getOrElse(Nil).flatMap(p => superConstArgs.get(p.name.toString).map(p.name -> _))
+      } else Nil
+
+
+    /**
+     * The `args` of this annotation passed to the `parent` class.
+     *
+     * `parent` needs to be either the annotation class itself or its direct superclass.
+     *
+     * If `parent` is the superclass, this method returns the arguments passed at the annotation definition. Forwarded
+     * arguments are supported.
+     *
+     * Example:
+     *
+     * {{{
+     *   class ann(x: Int = 1, y: Int = 2) extends Annotation
+     *   class sub(z: Int) extends ann(y = z)
+     *   @sub(3) def f = 1
+     * }}}
+     *
+     * The call `argsForSuper(symbolOfAnn)` returns `List(1, 3)`. The argument `1` is the default used in the super
+     * call, the value `3` is a forwarded argument.
+     */
+    def argsForSuper(parent: Symbol): List[Tree] =
+      if (symbol == parent) args
+      else if (symbol.superClass == parent) {
+        val subArgs = symbol.primaryConstructor.paramss.headOption.getOrElse(Nil).map(_.name.toString).zip(args).toMap
+        val superArgs: Map[String, Tree] = symbol.annotations.filter(_.matches(SuperArgAttr)).flatMap(_.args match {
+          case List(Literal(param), value) => Some(param.stringValue -> value)
+          case _ => None
+        }).toMap
+        val superFwdArgs: Map[String, String] = symbol.annotations.filter(_.matches(SuperFwdArgAttr)).flatMap(_.args match {
+          case List(Literal(param), Literal(subParam)) => Some(param.stringValue -> subParam.stringValue)
+          case _ => None
+        }).toMap
+        val params = parent.primaryConstructor.paramss.headOption.getOrElse(Nil)
+        val res = params.flatMap(p => {
+          val n = p.name.toString
+          superArgs.get(n).orElse(subArgs.get(superFwdArgs.getOrElse(n, "")))
+        })
+        if (params.lengthCompare(res) == 0) res else Nil
+      } else Nil
 
     /**
      * Obtain the constructor symbol that was used for this annotation.
