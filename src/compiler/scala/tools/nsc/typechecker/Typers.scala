@@ -4019,7 +4019,7 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
       def registerNowarn(info: AnnotationInfo): Unit = {
         if (annotee.isDefined && NowarnClass.exists && info.matches(NowarnClass) && !runReporting.suppressionExists(info.pos)) {
           var verbose = false
-          val filters = (info.assocs: @unchecked) match {
+          val filters = (info.assocsForSuper(NowarnClass): @unchecked) match {
             case Nil => List(MessageFilter.Any)
             case (_, LiteralAnnotArg(s)) :: Nil =>
               val str = s.stringValue

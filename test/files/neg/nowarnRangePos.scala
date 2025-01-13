@@ -104,3 +104,14 @@ class Uh {
     def g(c: C) = c.dep
   }
 }
+
+object sd884 {
+  class nodep extends nowarn("cat=deprecation")
+  class purr extends nowarn("msg=pure expression does nothing")
+
+  @nodep def t1 = new C().dep // no warn
+  @purr def t2 = new C().dep  // warn, plus unused @nowarn
+
+  @purr def t3 = { 1; 2 }  // no warn
+  @nodep def t4 = { 1; 2 } // warn, plus unused @nowarn
+}
