@@ -1,6 +1,7 @@
 
-scala> import annotation._
+scala> import annotation._, scala.util.chaining._
 import annotation._
+import scala.util.chaining._
 
 scala> class ann(x: Int = 1, y: Int = 2) extends Annotation
 class ann
@@ -15,6 +16,9 @@ class mul
 
 scala> class kon(x: Int = 1, y: Int = 2) extends ConstantAnnotation
 class kon
+
+scala> class rann(x: Int = 1.tap(println), y: Int) extends Annotation
+class rann
 
 scala> class C {
   val a = 1
@@ -98,5 +102,24 @@ val res4: List[$r.intp.global.Type] = List(Int(1) @scala.annotation.meta.default
 
 scala> i3.args.map(i3.argIsDefault)
 val res5: List[Boolean] = List(true, false)
+
+scala> // ordinary named/default args when using annotation class in executed code
+
+scala> new rann(y = 2.tap(println)); () // prints 2, then the default 1
+2
+1
+
+scala> @rann(y = {new rann(y = 2.tap(println)); 2}) class r1
+class r1
+
+scala> println(typeOf[r1].typeSymbol.annotations.head.args)
+List(scala.util.`package`.chaining.scalaUtilChainingOps[Int](1).tap[Unit](((x: Any) => scala.Predef.println(x))), {
+  {
+    <artifact> val x$1: Int = scala.util.`package`.chaining.scalaUtilChainingOps[Int](2).tap[Unit](((x: Any) => scala.Predef.println(x)));
+    <artifact> val x$2: Int = $line17.$read.INSTANCE.$iw.rann.<init>$default$1;
+    new $line17.$read.INSTANCE.$iw.rann(x$2, x$1)
+  };
+  2
+})
 
 scala> :quit

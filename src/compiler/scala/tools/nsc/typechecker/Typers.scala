@@ -3781,7 +3781,7 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
                     true
                   case _ => false
                 }
-                val (allArgs, missing) = addDefaults(args, qual, targs, previousArgss, params, fun.pos.focus, context)
+                val (allArgs, missing) = addDefaults(args, qual, targs, previousArgss, params, fun.pos.focus, context, mode)
                 val funSym = fun1 match { case Block(_, expr) => expr.symbol case x => throw new MatchError(x) }
                 val lencmp2 = compareLengths(allArgs, formals)
 
@@ -4193,7 +4193,7 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
         val typedAnn: Tree = {
           // local dummy fixes scala/bug#5544
           val localTyper = newTyper(context.make(ann, context.owner.newLocalDummy(ann.pos)))
-          localTyper.typed(ann, mode)
+          localTyper.typed(ann, mode | ANNOTmode)
         }
         @tailrec
         def annInfo(t: Tree): AnnotationInfo = t match {

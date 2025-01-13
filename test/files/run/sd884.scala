@@ -2,13 +2,14 @@ import scala.tools.partest.ReplTest
 
 object Test extends ReplTest {
   override def code =
-    """import annotation._
+    """import annotation._, scala.util.chaining._
       |class ann(x: Int = 1, y: Int = 2) extends Annotation
       |class naa(x: Int = 1, y: Int = 2) extends Annotation {
       |  def this(s: String) = this(1, 2)
       |}
       |class mul(x: Int = 1, y: Int = 2)(z: Int = 3, zz: Int = 4) extends Annotation
       |class kon(x: Int = 1, y: Int = 2) extends ConstantAnnotation
+      |class rann(x: Int = 1.tap(println), y: Int) extends Annotation
       |class C {
       |  val a = 1
       |  val b = 2
@@ -41,5 +42,9 @@ object Test extends ReplTest {
       |val i3 = typeOf[C].member(TermName("m3")).annotations.head
       |i3.args.map(_.tpe)
       |i3.args.map(i3.argIsDefault)
+      |// ordinary named/default args when using annotation class in executed code
+      |new rann(y = 2.tap(println)); () // prints 2, then the default 1
+      |@rann(y = {new rann(y = 2.tap(println)); 2}) class r1
+      |println(typeOf[r1].typeSymbol.annotations.head.args)
       |""".stripMargin
 }

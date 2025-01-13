@@ -358,7 +358,7 @@ trait NamesDefaults { self: Analyzer =>
             case Apply(_, typedArgs) if (typedApp :: typedArgs).exists(_.isErrorTyped) =>
               setError(tree) // bail out with and erroneous Apply *or* erroneous arguments, see scala/bug#7238, scala/bug#7509
             case Apply(expr, typedArgs) =>
-              val isAnnot = {
+              val isAnnot = mode.in(Mode.ANNOTmode) && {
                 val s = funOnly.symbol
                 s != null && s.isConstructor && s.owner.isNonBottomSubClass(AnnotationClass)
               }
@@ -456,13 +456,13 @@ trait NamesDefaults { self: Analyzer =>
    */
   def addDefaults(givenArgs: List[Tree], qual: Option[Tree], targs: List[Tree],
                   previousArgss: List[List[Tree]], params: List[Symbol],
-                  pos: scala.reflect.internal.util.Position, context: Context): (List[Tree], List[Symbol]) = {
+                  pos: scala.reflect.internal.util.Position, context: Context, mode : Mode): (List[Tree], List[Symbol]) = {
     if (givenArgs.length < params.length) {
       val (missing, positional) = missingParams(givenArgs, params, nameOfNamedArg)
       if (missing.forall(_.hasDefault)) {
         val defaultArgs = missing flatMap { p =>
           val annDefault =
-            if (p.owner.isConstructor && p.enclClass.isNonBottomSubClass(AnnotationClass) && !p.enclClass.isNonBottomSubClass(ConstantAnnotationClass))
+            if (mode.in(Mode.ANNOTmode) && p.owner.isConstructor && p.enclClass.isNonBottomSubClass(AnnotationClass) && !p.enclClass.isNonBottomSubClass(ConstantAnnotationClass))
               p.getAnnotation(DefaultArgAttr).flatMap(_.args.headOption).map(dflt => atPos(pos) {
                 // The `arg.tpe` is tagged with the `@defaultArg` annotation, see AnnotationInfo.argIsDefault
                 val arg = dflt.duplicate.setType(dflt.tpe.withAnnotation(AnnotationInfo(DefaultArgAttr.tpe, Nil, Nil)))
