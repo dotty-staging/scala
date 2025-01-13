@@ -4193,17 +4193,11 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
         }
         @tailrec
         def annInfo(t: Tree): AnnotationInfo = t match {
+          case Block(Nil, expr) => annInfo(expr)
+
           case Apply(Select(New(tpt), nme.CONSTRUCTOR), args) =>
             // `tpt.tpe` is more precise than `annType`, since it incorporates the types of `args`
             AnnotationInfo(tpt.tpe, args, Nil).setOriginal(typedAnn).setPos(t.pos)
-
-          case Block(_, expr) =>
-            if (!annTypeSym.isNonBottomSubClass(ConstantAnnotationClass))
-              context.warning(t.pos, "Usage of named or default arguments transformed this annotation\n"+
-                                "constructor call into a block. The corresponding AnnotationInfo\n"+
-                                "will contain references to local values and default getters instead\n"+
-                                "of the actual argument trees", WarningCategory.Other)
-            annInfo(expr)
 
           case Apply(fun, args) =>
             context.warning(t.pos, "Implementation limitation: multiple argument lists on annotations are\n"+

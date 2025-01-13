@@ -358,35 +358,46 @@ trait NamesDefaults { self: Analyzer =>
             case Apply(_, typedArgs) if (typedApp :: typedArgs).exists(_.isErrorTyped) =>
               setError(tree) // bail out with and erroneous Apply *or* erroneous arguments, see scala/bug#7238, scala/bug#7509
             case Apply(expr, typedArgs) =>
-              // Extract the typed arguments, restore the call-site evaluation order (using
-              // ValDef's in the block), change the arguments to these local values.
+              val isAnnot = {
+                val s = funOnly.symbol
+                s != null && s.isConstructor && s.owner.isNonBottomSubClass(AnnotationClass)
+              }
 
-              // typedArgs: definition-site order
-              val formals = formalTypes(expr.tpe.paramTypes, typedArgs.length, removeByName = false, removeRepeated = false)
-              // valDefs: call-site order
-              val valDefs = argValDefs(reorderArgsInv(typedArgs, argPos),
-                                       reorderArgsInv(formals, argPos),
-                                       blockTyper)
-              // refArgs: definition-site order again
-              val refArgs = map3(reorderArgs(valDefs, argPos), formals, typedArgs)((vDefOpt, tpe, origArg) => vDefOpt match {
-                case None => origArg
-                case Some(vDef) =>
-                  val ref = gen.mkAttributedRef(vDef.symbol)
-                  atPos(vDef.pos.focus) {
-                    // for by-name parameters, the local value is a nullary function returning the argument
-                    tpe.typeSymbol match {
-                      case ByNameParamClass   => Apply(ref, Nil)
-                      case RepeatedParamClass => Typed(ref, Ident(tpnme.WILDCARD_STAR))
-                      case _                  => origArg.attachments.get[UnnamedArg.type].foreach(ref.updateAttachment); ref
+              if (isAnnot) {
+                NamedApplyBlock(stats, typedApp)(NamedApplyInfo(qual, targs, vargss :+ typedArgs, blockTyper, tree))
+                  .setType(typedApp.tpe)
+                  .setPos(tree.pos.makeTransparent)
+              } else {
+                // Extract the typed arguments, restore the call-site evaluation order (using
+                // ValDef's in the block), change the arguments to these local values.
+
+                // typedArgs: definition-site order
+                val formals = formalTypes(expr.tpe.paramTypes, typedArgs.length, removeByName = false, removeRepeated = false)
+                // valDefs: call-site order
+                val valDefs = argValDefs(reorderArgsInv(typedArgs, argPos),
+                  reorderArgsInv(formals, argPos),
+                  blockTyper)
+                // refArgs: definition-site order again
+                val refArgs = map3(reorderArgs(valDefs, argPos), formals, typedArgs)((vDefOpt, tpe, origArg) => vDefOpt match {
+                  case None => origArg
+                  case Some(vDef) =>
+                    val ref = gen.mkAttributedRef(vDef.symbol)
+                    atPos(vDef.pos.focus) {
+                      // for by-name parameters, the local value is a nullary function returning the argument
+                      tpe.typeSymbol match {
+                        case ByNameParamClass => Apply(ref, Nil)
+                        case RepeatedParamClass => Typed(ref, Ident(tpnme.WILDCARD_STAR))
+                        case _ => origArg.attachments.get[UnnamedArg.type].foreach(ref.updateAttachment); ref
+                      }
                     }
-                  }
-              })
-              // cannot call blockTyper.typedBlock here, because the method expr might be partially applied only
-              val res = blockTyper.doTypedApply(tree, expr, refArgs, mode, pt)
-              res.setPos(res.pos.makeTransparent)
-              NamedApplyBlock(stats ::: valDefs.flatten, res)(NamedApplyInfo(qual, targs, vargss :+ refArgs, blockTyper, tree))
-                .setType(res.tpe)
-                .setPos(tree.pos.makeTransparent)
+                })
+                // cannot call blockTyper.typedBlock here, because the method expr might be partially applied only
+                val res = blockTyper.doTypedApply(tree, expr, refArgs, mode, pt)
+                res.setPos(res.pos.makeTransparent)
+                NamedApplyBlock(stats ::: valDefs.flatten, res)(NamedApplyInfo(qual, targs, vargss :+ refArgs, blockTyper, tree))
+                  .setType(res.tpe)
+                  .setPos(tree.pos.makeTransparent)
+              }
             case _ => tree
           }
         }
