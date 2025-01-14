@@ -21,7 +21,6 @@ import scala.collection.mutable
 import scala.collection.mutable.{HashSet, LinkedHashMap}
 import scala.jdk.javaapi.CollectionConverters
 import scala.language.implicitConversions
-import scala.reflect.internal.Chars.isIdentifierStart
 import scala.reflect.internal.util.SourceFile
 import scala.tools.nsc.io.AbstractFile
 import scala.tools.nsc.reporters.Reporter
@@ -1191,7 +1190,7 @@ class Global(settings: Settings, _reporter: Reporter, projectName: String = "") 
       results.filter { (member: Member) =>
         val symbol = member.sym
         def isStable = member.tpe.isStable || member.sym.isStable || member.sym.getterIn(member.sym.owner).isStable
-        def isJunk = !symbol.exists || symbol.name.isEmpty || !isIdentifierStart(member.sym.name.charAt(0)) // e.g. <byname>
+        def isJunk = !symbol.exists || symbol.name.isEmpty || symbol.encodedName.charAt(0) == '<' // e.g. <byname>
         def nameTypeOk: Boolean = {
           forImport || // Completing an import: keep terms and types.
             symbol.name.isTermName == name.isTermName || // Keep names of the same type
@@ -1202,7 +1201,7 @@ class Global(settings: Settings, _reporter: Reporter, projectName: String = "") 
           matcher(member.aliasInfo.map(_.sym.name).getOrElse(NoSymbol.name)) && !forImport && symbol.name.isTermName == name.isTermName
         }
         
-        !isJunk && member.accessible && !symbol.isConstructor && (name.isEmpty || (matcher(member.sym.name) || aliasTypeOk)
+        !isJunk && member.accessible && (name.isEmpty || (matcher(member.sym.name) || aliasTypeOk)
           && nameTypeOk)
 
       }

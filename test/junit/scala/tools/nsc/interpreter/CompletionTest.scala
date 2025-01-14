@@ -94,6 +94,9 @@ class CompletionTest {
     checkExact(completer, "object O { private def x_y_z = 1; x_y", "}")("x_y_z")
     checkExact(completer, "object x_y_z; import x_y")("x_y_z")
 
+    checkExact(completer, "object O { def `1 thing` = 1 }; O.")("1 thing")
+    checkExact(completer, "object O { def `<x>` = 1 }; O.")("<x>")
+
     checkExact(completer, "object x_y_z { def a_b_c }; import x_y_z.a_b")("a_b_c")
 
     checkExact(completer, "object X { private[this] def definition = 0; def")("definition")
