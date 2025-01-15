@@ -742,7 +742,7 @@ abstract class TreeGen {
         )
         val untupled = {
           val allpats = (pat :: pats).map(_.duplicate)
-          atPos(wrappingPos(allpats))(mkTuple(allpats))
+          atPos(wrappingPos(allpats))(mkTuple(allpats).updateAttachment(ForAttachment))
         }
         val pos1 =
           if (t.pos == NoPosition) NoPosition
@@ -816,7 +816,7 @@ abstract class TreeGen {
           rhs1,
           List(
             atPos(pat1.pos) {
-              CaseDef(pat1, EmptyTree, mkTuple(vars map (_._1) map Ident.apply))
+              CaseDef(pat1, EmptyTree, mkTuple(vars.map(_._1).map(Ident.apply)).updateAttachment(ForAttachment))
             }
           ))
       }
