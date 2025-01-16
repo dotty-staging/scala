@@ -635,7 +635,6 @@ lazy val replFrontend = configureAsSubproject(project, srcdir = Some("repl-front
   )
   .settings(
     run := (Compile / run).partialInput(" -usejavacp").evaluated, // so `replFrontend/run` works
-    Compile / run / javaOptions += s"-Dscala.color=${!scala.util.Properties.isWin}",
     Compile / run / javaOptions += "-Dorg.jline.terminal.output=forced-out",
   )
   .dependsOn(repl)
