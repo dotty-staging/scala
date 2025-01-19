@@ -1557,7 +1557,7 @@ trait Contexts { self: Analyzer with ImportTracking =>
         else if (impSym.isError || impSym.name == nme.CONSTRUCTOR)
           true
         // Try to reconcile them before giving up
-        else if (foreignDefined && reconcileAmbiguousImportAndDef)
+        else if (reconcileAmbiguousImportAndDef)
           true
         // Otherwise they are irreconcilably ambiguous
         else
