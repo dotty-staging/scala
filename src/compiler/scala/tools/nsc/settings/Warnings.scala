@@ -40,8 +40,8 @@ trait Warnings {
          |Syntax: -Wconf:<filters>:<action>,<filters>:<action>,...
          |multiple <filters> are combined with &, i.e., <filter>&...&<filter>
          |
-         |Note: Run with `-Wconf:any:warning-verbose` to print warnings with their category, site,
-         |and (for deprecations) origin and since-version.
+         |Use the `@nowarn("verbose")` / `@nowarn("v")` annotation or `-Wconf:any:warning-verbose`
+         |to print applicable message filters with every warning.
          |
          |<filter>
          |  - Any message: any

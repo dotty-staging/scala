@@ -4059,19 +4059,24 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
         }
       def registerNowarn(info: AnnotationInfo): Unit = {
         if (annotee.isDefined && NowarnClass.exists && info.matches(NowarnClass) && !runReporting.suppressionExists(info.pos)) {
+          var verbose = false
           val filters = (info.assocs: @unchecked) match {
             case Nil => List(MessageFilter.Any)
             case (_, LiteralAnnotArg(s)) :: Nil =>
-              if (s.stringValue.isEmpty) Nil
-              else {
-                val (ms, fs) = s.stringValue.split('&').map(WConf.parseFilter(_, runReporting.rootDirPrefix)).toList.partitionMap(identity)
+              val str = s.stringValue
+              if (str.isEmpty) Nil
+              else if (str == "v" || str == "verbose") {
+                verbose = true
+                List(MessageFilter.Any)
+              } else {
+                val (ms, fs) = str.split('&').map(WConf.parseFilter(_, runReporting.rootDirPrefix)).toList.partitionMap(identity)
                 if (ms.nonEmpty)
                   reporter.error(info.pos, s"Invalid message filter:\n${ms.mkString("\n")}")
                 fs
               }
           }
           val (start, end) = rangeFinder()
-          runReporting.addSuppression(Suppression(info.pos, filters, start, end))
+          runReporting.addSuppression(Suppression(info.pos, filters, start, end, verbose = verbose))
         }
       }
       def registerDeprecationSuppression(info: AnnotationInfo): Unit =
