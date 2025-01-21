@@ -74,6 +74,20 @@ class ArrayBufferBenchmark {
     bh.consume(b1)
   }
 
+  //addOne
+  @Benchmark def addOneArrayBuffer(bh:Blackhole):Unit = {
+    val res = ArrayBuffer[Object]()
+    ref.asInstanceOf[ArrayBuffer[Object]].foreach(res.addOne)
+    bh.consume(res)
+  }
+
+  //addOne comparison
+  @Benchmark def addOneArrayList(bh:Blackhole):Unit = {
+    val res = new java.util.ArrayList[Object]()
+    ref.asInstanceOf[ArrayBuffer[Object]].foreach(res.add)
+    bh.consume(res)
+  }
+
   // append `Iterable` with known size
   @Benchmark def addAll2(bh: Blackhole): Unit = {
     val b = ref.clone()
