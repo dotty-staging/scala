@@ -120,6 +120,16 @@ class CompletionTest {
   }
 
   @Test
+  def backticks(): Unit = {
+    val intp = newIMain()
+    val completer = new ReplCompletion(intp)
+
+    checkExact(completer, "object X { def `Foo Bar` = 0; this.`Foo ", after = "` }")("Foo Bar")
+    checkExact(completer, "val `Foo Bar` = 0; `Foo ", after = "`")("Foo Bar")
+    checkExact(completer, "def foo(`Foo Bar`: Int) { `Foo ", after = "` }")("Foo Bar")
+  }
+
+  @Test
   def annotations(): Unit = {
     val completer = setup()
     checkExact(completer, "def foo[@specialize", " A]")("specialized")
