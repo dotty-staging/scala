@@ -208,7 +208,7 @@ trait MatchOptimization extends MatchTreeMaking with MatchApproximation {
   trait SwitchEmission extends TreeMakers with MatchMonadInterface {
     import treeInfo.isGuardedCase
 
-    def inAsync: Boolean
+    def inForceDesugar: Boolean
 
     abstract class SwitchMaker {
       abstract class SwitchableTreeMakerExtractor { def unapply(x: TreeMaker): Option[Tree] }
@@ -502,7 +502,7 @@ trait MatchOptimization extends MatchTreeMaking with MatchApproximation {
     class RegularSwitchMaker(scrutSym: Symbol, matchFailGenOverride: Option[Tree => Tree], val unchecked: Boolean) extends SwitchMaker { import CODE._
       val switchableTpe = Set(ByteTpe, ShortTpe, IntTpe, CharTpe, StringTpe)
       val alternativesSupported = true
-      val canJump = !inAsync
+      val canJump = !inForceDesugar
 
       // Constant folding sets the type of a constant tree to `ConstantType(Constant(folded))`
       // The tree itself can be a literal, an ident, a selection, ...
