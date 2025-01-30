@@ -43,7 +43,7 @@ trait Calculate {
   /**
    *  Merely traverses the target and records symbols local to the reifee along with their metalevels.
    */
-  val calculate = new Traverser {
+  val calculate: Traverser = new Traverser {
     // see the explanation of metalevels in `Metalevels`
     var currMetalevel = 1
 

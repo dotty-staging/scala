@@ -636,6 +636,7 @@ object Reporting {
     val LintAdaptedArgs,
         LintNullaryUnit,
         LintInaccessible,
+        LintStructuralType,
         LintInferAny,
         LintMissingInterpolator,
         LintDocDetached,

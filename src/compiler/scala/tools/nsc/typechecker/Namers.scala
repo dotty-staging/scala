@@ -1080,15 +1080,48 @@ trait Namers extends MethodSynthesis {
      *  inline the def to "opt in".
      */
     private def assignTypeToTree(tree: ValOrDefDef, defnTyper: Typer, pt: Type): Type = {
+      class CheckOrDropStructural(drop: Boolean, rhsTpe: Type) extends TypeMap {
+        override def apply(tp: Type): Type = tp match {
+          case rt: RefinedType =>
+            val sym = tree.symbol
+            val warns = rt.decls.filter(_.isOnlyRefinementMember)
+            if (warns.nonEmpty) {
+              if (drop) {
+                val keep = rt.decls.toList.filterNot(warns.toSet)
+                if (keep.isEmpty && rt.parents.sizeIs == 1) rt.parents.head
+                else {
+                  val res = refinedType(rt.parents, rt.typeSymbol)
+                  keep.foreach(res.decls.enter)
+                  res
+                }
+              } else {
+                val cat = if (currentRun.isScala3) WarningCategory.Scala3Migration else WarningCategory.LintStructuralType
+                val msg =
+                  if (currentRun.isScala3) s"in Scala 3 (or with -Xsource-features:no-infer-structural), $sym will no longer have a structural type"
+                  else s"$sym has an inferred structural type"
+                context.warning(sym.pos,
+                  s"""$msg: $rhsTpe
+                     |  members that can be accessed with a reflective call: ${warns.mkString(",")}""".stripMargin,
+                  cat)
+                rt
+              }
+            } else rt
+          case _ =>
+            mapOver(tp)
+        }
+      }
       val rhsTpe = tree match {
         case ddef: DefDef if tree.symbol.isTermMacro => defnTyper.computeMacroDefType(ddef, pt) // unreached, see methodSig
         case _ => defnTyper.computeType(tree.rhs, pt)
       }
+      val nonStructural = if (!tree.symbol.isLocalToBlock && (currentRun.isScala3 || settings.warnInferStructural))
+        new CheckOrDropStructural(currentRun.sourceFeatures.noInferStructural, rhsTpe)(rhsTpe)
+      else rhsTpe
       tree.tpt.defineType {
         // infer from overridden symbol, contingent on Xsource; exclude constants and whitebox macros
         val inferOverridden = currentRun.isScala3 &&
           !pt.isWildcard && pt != NoType && !pt.isErroneous &&
-          !(tree.isInstanceOf[ValDef] && tree.symbol.isFinal && isConstantType(rhsTpe)) &&
+          !(tree.isInstanceOf[ValDef] && tree.symbol.isFinal && isConstantType(nonStructural)) &&
           openMacros.isEmpty && {
             context.unit.transformed.get(tree.rhs) match {
               case Some(t) if t.hasAttachment[MacroExpansionAttachment] =>
@@ -1097,7 +1130,7 @@ trait Namers extends MethodSynthesis {
               case _ => true
             }
           }
-        val legacy = dropIllegalStarTypes(widenIfNecessary(tree.symbol, rhsTpe, pt))
+        val legacy = dropIllegalStarTypes(widenIfNecessary(tree.symbol, nonStructural, pt))
         // <:< check as a workaround for scala/bug#12968
         def warnIfInferenceChanged(): Unit = if (!(legacy =:= pt || legacy <:< pt && pt <:< legacy)) {
           val pts = pt.toString

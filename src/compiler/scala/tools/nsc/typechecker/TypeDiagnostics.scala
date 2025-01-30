@@ -944,5 +944,65 @@ trait TypeDiagnostics extends splain.SplainDiagnostics {
           context0.error(ex.pos, ex.msg)
       }
     }
+
+    /** Check that type `tree` does not refer to private
+     *  components unless itself is wrapped in something private
+     *  (`owner` tells where the type occurs).
+     */
+    def checkNoEscapingPrivates(typer: Typer, owner: Symbol, tree: Tree): Tree =
+      if (owner.isJavaDefined) tree
+      else new CheckNoEscaping(typer, owner, tree).check(tree)
+
+    /** Check that type of given tree does not contain local or private components. */
+    private final class CheckNoEscaping(typer: Typer, owner: Symbol, tree: Tree) extends TypeMap {
+      private var hiddenSymbols: List[Symbol] = Nil
+
+      def check(tree: Tree): Tree = {
+        import typer.TyperErrorGen._
+        val tp1 = apply(tree.tpe)
+        if (hiddenSymbols.isEmpty) tree setType tp1
+        else if (hiddenSymbols exists (_.isErroneous)) HiddenSymbolWithError(tree)
+        else if (tp1.typeSymbol.isAnonymousClass)
+          check(tree setType tp1.typeSymbol.classBound)
+        else if (owner == NoSymbol)
+          tree setType packSymbols(hiddenSymbols.reverse, tp1)
+        else if (!isPastTyper) { // privates
+          val badSymbol = hiddenSymbols.head
+          SymbolEscapesScopeError(tree, badSymbol)
+        } else tree
+      }
+
+      def addHidden(sym: Symbol) =
+        if (!(hiddenSymbols contains sym)) hiddenSymbols = sym :: hiddenSymbols
+
+      override def apply(t: Type): Type = {
+        def checkNoEscape(sym: Symbol): Unit = {
+          if (sym.isPrivate && !sym.hasFlag(SYNTHETIC_PRIVATE)) {
+            var o = owner
+            while (o != NoSymbol && o != sym.owner && o != sym.owner.linkedClassOfClass &&
+              !o.isLocalToBlock && !o.isPrivate &&
+              !o.privateWithin.hasTransOwner(sym.owner))
+              o = o.owner
+            if (o == sym.owner || o == sym.owner.linkedClassOfClass)
+              addHidden(sym)
+          }
+        }
+        mapOver(
+          t match {
+            case TypeRef(_, sym, args) =>
+              checkNoEscape(sym)
+              if (!hiddenSymbols.isEmpty && hiddenSymbols.head == sym &&
+                sym.isAliasType && sameLength(sym.typeParams, args)) {
+                hiddenSymbols = hiddenSymbols.tail
+                t.dealias
+              } else t
+            case SingleType(_, sym) =>
+              checkNoEscape(sym)
+              t
+            case _ =>
+              t
+          })
+      }
+    }
   }
 }
