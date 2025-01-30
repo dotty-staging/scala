@@ -41,7 +41,10 @@ object MimaFilters extends AutoPlugin {
 
     // KEEP: the CommonErrors object is not a public API
     ProblemFilters.exclude[MissingClassProblem]("scala.collection.generic.CommonErrors"),
-    ProblemFilters.exclude[MissingClassProblem]("scala.collection.generic.CommonErrors$")
+    ProblemFilters.exclude[MissingClassProblem]("scala.collection.generic.CommonErrors$"),
+
+    // scala/scala#10927
+    ProblemFilters.exclude[ReversedMissingMethodProblem]("scala.concurrent.Future.onCompleteWithUnregister"),
   )
 
   override val buildSettings = Seq(
