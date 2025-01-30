@@ -183,4 +183,7 @@ trait StdAttachments {
   case object DiscardedExpr extends PlainAttachment
   /** Anonymous parameter of `if (_)` may be inferred as Boolean. */
   case object BooleanParameterType extends PlainAttachment
+
+  /** Force desugaring Match trees, don't emit switches. Attach to DefDef trees or their symbol. */
+  case object ForceMatchDesugar extends PlainAttachment
 }

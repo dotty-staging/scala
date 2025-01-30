@@ -31,8 +31,6 @@ abstract class AsyncPhase extends Transform with TypingTransformers with AnfTran
                                            stateDiagram: ((Symbol, Tree) => Option[String => Unit]),
                                            allowExceptionsToPropagate: Boolean) extends PlainAttachment
 
-  def hasAsyncAttachment(dd: DefDef) = dd.hasAttachment[AsyncAttachment]
-
   // Optimization: avoid the transform altogether if there are no async blocks in a unit.
   private val sourceFilesToTransform = perRunCaches.newSet[SourceFile]()
   private val awaits: mutable.Set[Symbol] = perRunCaches.newSet[Symbol]()
@@ -51,6 +49,7 @@ abstract class AsyncPhase extends Transform with TypingTransformers with AnfTran
     val stateDiagram = config.getOrElse("stateDiagram", (_: Symbol, _: Tree) => None).asInstanceOf[(Symbol, Tree) => Option[String => Unit]]
     val allowExceptionsToPropagate = config.contains("allowExceptionsToPropagate")
     method.updateAttachment(new AsyncAttachment(awaitMethod, postAnfTransform, stateDiagram, allowExceptionsToPropagate))
+    method.updateAttachment(ForceMatchDesugar)
     // Wrap in `{ expr: Any }` to force value class boxing before calling `completeSuccess`, see test/async/run/value-class.scala
     deriveDefDef(method) { rhs =>
       Block(Apply(gen.mkAttributedRef(definitions.Predef_locally), rhs :: Nil).updateAttachment(TypedExpectingUnitAttachment), Literal(Constant(())))
