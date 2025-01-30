@@ -146,10 +146,13 @@ trait Reporting extends internal.Reporting { self: ast.Positions with Compilatio
       suspendedMessages.clear()
     }
 
-    private def isSuppressed(warning: Message): Boolean =
+    private def nowarnAction(warning: Message): Action =
       suppressions.getOrElse(repSrc(warning.pos.source), Nil).find(_.matches(warning)) match {
-        case Some(s) => s.markUsed(); true
-        case _ => false
+        case Some(s) =>
+          s.markUsed()
+          if (s.verbose) Action.WarningVerbose else Action.Silent
+        case _ =>
+          Action.Warning
       }
 
     def clearSuppressionsComplete(sourceFile: SourceFile): Unit = suppressionsComplete -= repSrc(sourceFile)
@@ -164,7 +167,7 @@ trait Reporting extends internal.Reporting { self: ast.Positions with Compilatio
 
     def runFinished(hasErrors: Boolean): Unit = {
       // report suspended messages (in case the run finished before typer)
-      suspendedMessages.valuesIterator.foreach(_.foreach(issueWarning))
+      suspendedMessages.valuesIterator.foreach(_.foreach(issueWarning(_)))
 
       // report unused nowarns only if all all phases are done. scaladoc doesn't run all phases.
       if (!hasErrors && settings.warnUnusedNowarn && !settings.isScaladoc)
@@ -196,8 +199,8 @@ trait Reporting extends internal.Reporting { self: ast.Positions with Compilatio
       sm.getOrElseUpdate(category, mutable.LinkedHashMap.empty)
     }
 
-    private def issueWarning(warning: Message): Unit = {
-      val action = wconf.action(warning)
+    private def issueWarning(warning: Message, verbose: Boolean = false): Unit = {
+      val action = if (verbose) Action.WarningVerbose else wconf.action(warning)
 
       val quickfixed = {
         if (!skipRewriteAction(action) && registerTextEdit(warning)) s"[rewritten by -quickfix] ${warning.msg}"
@@ -240,9 +243,12 @@ trait Reporting extends internal.Reporting { self: ast.Positions with Compilatio
     def issueIfNotSuppressed(warning: Message): Unit =
       if (shouldSuspend(warning))
         suspendedMessages.getOrElseUpdate(repSrc(warning.pos.source), mutable.LinkedHashSet.empty) += warning
-      else {
-        if (!isSuppressed(warning))
+      else nowarnAction(warning) match {
+        case Action.Warning =>
           issueWarning(warning)
+        case Action.WarningVerbose =>
+          issueWarning(warning, verbose = true)
+        case _ =>
       }
 
     private def summarize(action: Action, category: WarningCategory): Unit = {
@@ -895,7 +901,7 @@ object Reporting {
     }
   }
 
-  case class Suppression(annotPos: Position, filters: List[MessageFilter], start: Int, end: Int, synthetic: Boolean = false) {
+  case class Suppression(annotPos: Position, filters: List[MessageFilter], start: Int, end: Int, synthetic: Boolean = false, verbose: Boolean = false) {
     private[this] var _used = false
     def used: Boolean = _used
     def markUsed(): Unit = { _used = true }

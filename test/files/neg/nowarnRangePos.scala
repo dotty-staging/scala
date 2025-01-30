@@ -79,6 +79,17 @@ class C {
     val a = dep: @nowarn
     a + dep
   }
+
+  @nowarn object T12 {
+    @nowarn("v") def f = try 1
+    def g = { 1; 2 }
+  }
+
+  @nowarn("verbose") object T13 {
+    @nowarn def f = try 1
+    def g = { 1; 2 }
+    @nowarn("v") def unused = 0
+  }
 }
 
 trait T {
