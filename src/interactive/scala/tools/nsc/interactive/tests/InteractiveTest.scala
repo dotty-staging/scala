@@ -86,9 +86,10 @@ abstract class InteractiveTest
         loadSources()
         runDefaultTests()
       }
-    }.linesIterator.map(normalize).foreach(println)
+    }.linesIterator.filterNot(filterOutLines).map(normalize).foreach(println)
   }
 
+  protected def filterOutLines(line: String) = false
   protected def normalize(s: String) = s
 
   /** Load all sources before executing the test. */
