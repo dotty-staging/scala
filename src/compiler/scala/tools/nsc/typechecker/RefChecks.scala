@@ -1838,7 +1838,9 @@ abstract class RefChecks extends Transform {
         )
         if (!isOk) {
           val msg = s"side-effecting nullary methods are discouraged: suggest defining as `def ${sym.name.decode}()` instead"
-          val namePos = sym.pos.focus.withEnd(sym.pos.point + sym.decodedName.length)
+          val namePos =
+            if (sym.pos.isRange) sym.pos
+            else sym.pos.toRange.withEnd(sym.pos.point + sym.decodedName.length)
           val action =
             if (namePos.source.sourceAt(namePos) == sym.decodedName)
               runReporting.codeAction("add empty parameter list", namePos.focusEnd, "()", msg)

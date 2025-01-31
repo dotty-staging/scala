@@ -4,7 +4,7 @@ import scala.reflect.runtime.{currentMirror => cm}
 import scala.tools.reflect.ToolBox
 
 object Test {
-  val toolbox = cm.mkToolBox(options = "-Yrangepos")
+  val toolbox = cm.mkToolBox()
 
   def main(args: Array[String]): Unit = {
     def test(expr: String): Unit = {
