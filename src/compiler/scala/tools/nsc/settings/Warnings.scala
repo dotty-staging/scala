@@ -223,7 +223,7 @@ trait Warnings {
     val RecurseWithDefault     = LintWarning("recurse-with-default",      "Recursive call used default argument.")
     val UnitSpecialization     = LintWarning("unit-special",              "Warn for specialization of Unit in parameter position.")
     val ImplicitRecursion      = LintWarning("implicit-recursion",        "Implicit resolves to an enclosing definition.")
-    val UniversalMethods       = LintWarning("universal-methods",         "Require arg to is/asInstanceOf. No Unit receiver.")
+    val UniversalMethods       = LintWarning("universal-methods",         "Dubious usage of member of `Any` or `AnyRef`.")
     val NumericMethods         = LintWarning("numeric-methods",           "Dubious usages, such as `42.isNaN`.")
     val ArgDiscard             = LintWarning("arg-discard",               "-Wvalue-discard for adapted arguments.")
     val IntDivToFloat          = LintWarning("int-div-to-float",          "Warn when an integer division is converted (widened) to floating point: `(someInt / 2): Double`.")

@@ -152,29 +152,28 @@ trait Implicits extends splain.SplainData {
           encl.owner == rts.owner && encl.isClass && encl.isImplicit && encl.name == rts.name.toTypeName
         if (target != NoSymbol)
           context.owner.ownersIterator
-          .find(encl => encl == target || rtsIsImplicitWrapper && targetsImplicitWrapper(encl)) match {
-            case Some(encl) =>
-              var doWarn = false
-              var help = ""
-              if (!encl.isClass) {
-                doWarn = true
-                if (encl.isMethod && targetsUniversalMember(encl.info.finalResultType))
-                  help = s"; the conversion adds a member of AnyRef to ${tree.symbol}"
-              }
-              else if (encl.isModuleClass) {
-                doWarn = true
-              }
-              else if (isSelfEnrichment(encl)) {
-                doWarn = true
-                help = s"; the enrichment wraps ${tree.symbol}"
-              }
-              else if (targetsUniversalMember(encl.info)) {
-                doWarn = true
+          .find(encl => encl == target || rtsIsImplicitWrapper && targetsImplicitWrapper(encl))
+          .foreach { encl =>
+            var doWarn = false
+            var help = ""
+            if (!encl.isClass) {
+              doWarn = true
+              if (encl.isMethod && targetsUniversalMember(encl.info.finalResultType))
                 help = s"; the conversion adds a member of AnyRef to ${tree.symbol}"
-              }
-              if (doWarn)
-                context.warning(result.tree.pos, s"Implicit resolves to enclosing $encl$help", WFlagSelfImplicit)
-            case _ =>
+            }
+            else if (encl.isModuleClass) {
+              doWarn = true
+            }
+            else if (isSelfEnrichment(encl)) {
+              doWarn = true
+              help = s"; the enrichment wraps ${tree.symbol}"
+            }
+            else if (targetsUniversalMember(encl.info)) {
+              doWarn = true
+              help = s"; the conversion adds a member of AnyRef to ${tree.symbol}"
+            }
+            if (doWarn)
+              context.warning(result.tree.pos, s"Implicit resolves to enclosing $encl$help", WFlagSelfImplicit)
           }
       }
       if (result.inPackagePrefix && currentRun.isScala3) {
