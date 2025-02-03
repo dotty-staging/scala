@@ -3913,14 +3913,15 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
                   if (!argtparams.isEmpty) {
                     val strictPt = formal.instantiateTypeParams(tparams, strictTargs)
                     inferArgumentInstance(arg1, argtparams, strictPt, lenientPt)
-                    arg1
-                  } else arg1
+                  }
+                  arg1
                 }
                 val args1 = map2(args, formals)(typedArgToPoly)
-                if (args1 exists { _.isErrorTyped }) duplErrTree
+                if (args1.exists(_.isErrorTyped)) duplErrTree
                 else {
                   debuglog("infer method inst " + fun + ", tparams = " + tparams + ", args = " + args1.map(_.tpe) + ", pt = " + pt + ", lobounds = " + tparams.map(_.tpe.lowerBound) + ", parambounds = " + tparams.map(_.info)) //debug
-                  // define the undetparams which have been fixed by this param list, replace the corresponding symbols in "fun"
+                  // define the undetparams which have been fixed by this param list,
+                  // replace the corresponding symbols in "fun"
                   // returns those undetparams which have not been instantiated.
                   val undetparams = inferMethodInstance(fun, tparams, args1, pt)
                   try doTypedApply(tree, fun, args1, mode, pt)
@@ -5838,6 +5839,7 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
         }
       }
 
+      // pre-begin typed1
       val sym: Symbol = tree.symbol
       if ((sym ne null) && (sym ne NoSymbol)) sym.initialize
 

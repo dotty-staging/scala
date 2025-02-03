@@ -163,17 +163,20 @@ trait PatternTypers {
       val baseClass = exprTyped.tpe.typeSymbol match {
         case ArrayClass   => ArrayClass
         case NothingClass => NothingClass
+        case NullClass    => NullClass
         case _            => SeqClass
       }
       val starType = baseClass match {
         case ArrayClass if isPrimitiveValueType(pt) || !isFullyDefined(pt) => arrayType(pt)
         case ArrayClass                                                    => boundedArrayType(pt)
+        case NullClass                                                     => seqType(NothingTpe)
         case _                                                             => seqType(pt)
       }
       val exprAdapted = adapt(exprTyped, mode, starType)
-      exprAdapted.tpe baseType baseClass match {
+      exprAdapted.tpe.baseType(baseClass) match {
         case TypeRef(_, _, elemtp :: Nil)   => treeCopy.Typed(tree, exprAdapted, tpt setType elemtp) setType elemtp
         case _ if baseClass eq NothingClass => exprAdapted
+        case _ if baseClass eq NullClass    => treeCopy.Typed(tree, exprAdapted, tpt.setType(NothingTpe)).setType(NothingTpe)
         case _                              => setError(tree)
       }
     }
