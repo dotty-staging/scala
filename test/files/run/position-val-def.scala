@@ -18,6 +18,7 @@ object Test extends CompilerTest {
     val (x, y) = (42, 27)
     val (x, y), (w, z) = (42, 27)
     val x, y, z: String = "hello, worlds"
+    val Some(_) = Option(42)
     """.linesIterator.map(_.trim).filter(_.nonEmpty)
        .map(s => s"class C${counter.getAndIncrement} { $s }")
        .toList

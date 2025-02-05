@@ -776,10 +776,16 @@ abstract class TreeGen {
     case Some((name, tpt)) =>
       atPos(pat.pos | rhsPos) {
         ValDef(mods, name.toTermName, tpt, rhs)
-          .updateAttachment(NamePos(pat.pos))
-          .tap(vd =>
-              if (forFor) propagatePatVarDefAttachments(pat, vd)
-              else propagateNoWarnAttachment(pat, vd))
+          .tap { vd =>
+            val namePos = pat match {
+              case id @ Ident(_) => id.pos
+              case Typed(id @ Ident(_), _) => id.pos
+              case pat => pat.pos
+            }
+            vd.updateAttachment(NamePos(namePos))
+            if (forFor) propagatePatVarDefAttachments(pat, vd)
+            else propagateNoWarnAttachment(pat, vd)
+          }
       } :: Nil
 
     case None =>

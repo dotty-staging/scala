@@ -2922,7 +2922,9 @@ self =>
      */
     def patDefOrDcl(start: Int, mods: Modifiers): List[Tree] = {
       def mkDefs(mods: Modifiers, pat: Tree, tp: Tree, rhs: Tree, rhsPos: Position, defPos: Position): List[Tree] = {
-        val pat1 = if (tp.isEmpty) pat else Typed(pat, tp).setPos(pat.pos | tp.pos)
+        val pat1 =
+          if (tp.isEmpty) pat
+          else Typed(pat, tp).setPos((pat.pos | tp.pos).makeTransparent) // pos may extend over other patterns
         val trees = makePatDef(mods, pat1, rhs, rhsPos)
         val defs = if (trees.lengthCompare(1) == 0) trees else trees.tail
         defs.foreach(d => d.setPos(defPos.withPoint(d.pos.start).makeTransparent))
@@ -2968,7 +2970,7 @@ self =>
       // each valdef gets transparent defPos with point at name and NamePos
       val lhsPos = wrappingPos(lhs)
       val defPos = {
-        if (lhsPos.isRange) lhsPos.withStart(start).withEnd(in.lastOffset)
+        if (lhsPos.isRange) lhsPos.copyRange(start = start, end = in.lastOffset)
         else o2p(start)
       }
       def expandPatDefs(lhs: List[Tree], expansion: List[Tree]): List[Tree] =

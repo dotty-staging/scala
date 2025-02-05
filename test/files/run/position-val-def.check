@@ -1,3 +1,6 @@
+newSource8.scala:1: warning: Pattern definition introduces Unit-valued member of C7; consider wrapping it in `locally { ... }`.
+class C7 { val Some(_) = Option(42) }
+               ^
 class C0 { val x = 42 }
 [15:16] <11:21> [NoPosition]   -> private[this] val x: Int = _
 [15]    [15]    [15]           -> <stable> <accessor> def x(): Int = C0.this.x
@@ -77,4 +80,9 @@ class C6 { val x, y, z: String = "hello, worlds" }
 [15:24] [33]                   -> C6.this.x = "hello, worlds"
 [18:24] [33]                   -> C6.this.y = "hello, worlds"
 [21:30] [33:48]                -> C6.this.z = "hello, worlds"
+--
+class C7 { val Some(_) = Option(42) }
+<11:35> <11:35> [NoPosition]   -> <synthetic> <artifact> private[this] val x$1: scala.runtime.BoxedUnit = _
+<11:35> [25:35]                -> C7.this.x$1 = {...
+[25:35] [25:35] [25:35]        -> case <synthetic> val x1: Option = (scala.Option.apply(scala.Int.box(42)): Option)
 --
