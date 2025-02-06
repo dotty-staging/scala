@@ -818,7 +818,7 @@ abstract class TreeGen {
           (ok, rhsUnchecked)
       }
       val vars = getVariables(pat1)
-      val matchExpr = atPos((pat1.pos union rhsPos).makeTransparent) {
+      val matchExpr = atPos((pat1.pos | rhsPos).makeTransparent) {
         Match(
           rhs1,
           List(
@@ -836,16 +836,14 @@ abstract class TreeGen {
           } :: Nil
         case _ =>
           val tmp = freshTermName()
-          val firstDef =
-            atPos(matchExpr.pos) {
-              val v = ValDef(Modifiers(PrivateLocal | SYNTHETIC | ARTIFACT | (mods.flags & LAZY)), tmp, TypeTree(), matchExpr)
-              if (vars.isEmpty) {
-                v.updateAttachment(PatVarDefAttachment)  // warn later if this introduces a Unit-valued field
+          val firstDef = atPos(matchExpr.pos) {
+            ValDef(Modifiers(PrivateLocal | SYNTHETIC | ARTIFACT | (mods.flags & LAZY)), tmp, TypeTree(), matchExpr)
+              .tap(vd => if (vars.isEmpty) {
+                vd.updateAttachment(PatVarDefAttachment)  // warn later if this introduces a Unit-valued field
                 if (mods.isImplicit)
                   currentRun.reporting.deprecationWarning(matchExpr.pos, "Implicit pattern definition binds no variables", since="2.13", "", "")
-              }
-              v
-            }
+              })
+          }
           var cnt = 0
           val restDefs = for ((vname, tpt, pos, original) <- vars) yield atPos(pos) {
             cnt += 1
