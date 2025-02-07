@@ -43,9 +43,6 @@ object MimaFilters extends AutoPlugin {
     ProblemFilters.exclude[MissingClassProblem]("scala.collection.generic.CommonErrors"),
     ProblemFilters.exclude[MissingClassProblem]("scala.collection.generic.CommonErrors$"),
 
-    // scala/scala#10927
-    ProblemFilters.exclude[ReversedMissingMethodProblem]("scala.concurrent.Future.onCompleteWithUnregister"),
-
     // scala/scala#10937
     ProblemFilters.exclude[IncompatibleResultTypeProblem]("scala.collection.immutable.LazyList#LazyBuilder#DeferredState.eval"),
     ProblemFilters.exclude[MissingClassProblem](s"scala.collection.immutable.LazyList$$State"),
