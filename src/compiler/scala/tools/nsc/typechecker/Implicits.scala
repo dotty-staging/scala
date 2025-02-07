@@ -24,8 +24,9 @@ import scala.collection.mutable, mutable.{LinkedHashMap, ListBuffer}
 import scala.language.implicitConversions
 import scala.reflect.internal.util.{ReusableInstance, Statistics, TriState}
 import scala.reflect.internal.TypesStats
-import scala.tools.nsc.Reporting.WarningCategory
+import scala.tools.nsc.Reporting.WarningCategory.{Scala3Migration, WFlagSelfImplicit}
 import symtab.Flags._
+import PartialFunction.cond
 
 /** This trait provides methods to find various kinds of implicits.
  *
@@ -135,15 +136,51 @@ trait Implicits extends splain.SplainData {
         }
       }
       if (settings.lintImplicitRecursion) {
-        val s = if (rts.isAccessor) rts.accessed else if (rts.isModule) rts.moduleClass else rts
-        if (s != NoSymbol && context.owner.hasTransOwner(s))
-          context.warning(result.tree.pos, s"Implicit resolves to enclosing $rts", WarningCategory.WFlagSelfImplicit)
+        val target =
+          if (rts.isAccessor) rts.accessed
+          else if (rts.isModule) rts.moduleClass
+          else rts
+        val rtsIsImplicitWrapper = isView && rts.isMethod && rts.isSynthetic && rts.isImplicit
+        def isSelfEnrichment(encl: Symbol): Boolean =
+          tree.symbol.isParamAccessor && tree.symbol.owner == encl && !encl.isDerivedValueClass
+        def targetsUniversalMember(target: => Type): Boolean = cond(pt) {
+          case TypeRef(pre, sym, _ :: RefinedType(WildcardType :: Nil, decls) :: Nil) =>
+            sym == FunctionClass(1) &&
+            decls.exists(d => d.isMethod && d.info == WildcardType && isUniversalMember(target.member(d.name)))
+        }
+        def targetsImplicitWrapper(encl: Symbol): Boolean =
+          encl.owner == rts.owner && encl.isClass && encl.isImplicit && encl.name == rts.name.toTypeName
+        if (target != NoSymbol)
+          context.owner.ownersIterator
+          .find(encl => encl == target || rtsIsImplicitWrapper && targetsImplicitWrapper(encl))
+          .foreach { encl =>
+            var doWarn = false
+            var help = ""
+            if (!encl.isClass) {
+              doWarn = true
+              if (encl.isMethod && targetsUniversalMember(encl.info.finalResultType))
+                help = s"; the conversion adds a member of AnyRef to ${tree.symbol}"
+            }
+            else if (encl.isModuleClass) {
+              doWarn = true
+            }
+            else if (isSelfEnrichment(encl)) {
+              doWarn = true
+              help = s"; the enrichment wraps ${tree.symbol}"
+            }
+            else if (targetsUniversalMember(encl.info)) {
+              doWarn = true
+              help = s"; the conversion adds a member of AnyRef to ${tree.symbol}"
+            }
+            if (doWarn)
+              context.warning(result.tree.pos, s"Implicit resolves to enclosing $encl$help", WFlagSelfImplicit)
+          }
       }
       if (result.inPackagePrefix && currentRun.isScala3) {
         val msg =
           s"""Implicit $rts was found in a package prefix of the required type, which is not part of the implicit scope in Scala 3 (or with -Xsource-features:package-prefix-implicits).
              |For migration, add `import ${rts.fullNameString}`.""".stripMargin
-        context.warning(result.tree.pos, msg, WarningCategory.Scala3Migration)
+        context.warning(result.tree.pos, msg, Scala3Migration)
       }
     }
     implicitSearchContext.emitImplicitDictionary(result)

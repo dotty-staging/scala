@@ -71,10 +71,10 @@ trait FlagOps { self: TastyUniverse =>
     def is(mask: TastyFlagSet)(implicit ctx: Context): Boolean =
       sym.hasAllFlags(unsafeEncodeTastyFlagSet(mask, ctx.isJava))
     def is(mask: TastyFlagSet, butNot: TastyFlagSet)(implicit ctx: Context): Boolean =
-      if (!butNot)
-        sym.is(mask)
+      if (butNot.hasFlags)
+        is(mask) && not(butNot)
       else
-        sym.is(mask) && sym.not(butNot)
+        is(mask)
     def not(mask: TastyFlagSet)(implicit ctx: Context): Boolean =
       sym.hasNoFlags(unsafeEncodeTastyFlagSet(mask, ctx.isJava))
   }

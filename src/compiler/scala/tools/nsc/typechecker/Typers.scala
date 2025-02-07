@@ -1333,10 +1333,30 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
           case coercion  =>
             if (settings.logImplicitConv.value)
               context.echo(qual.pos, s"applied implicit conversion from ${qual.tpe} to ${searchTemplate} = ${coercion.symbol.defString}")
-
             if (currentRun.isScala3 && coercion.symbol == currentRun.runDefinitions.Predef_any2stringaddMethod)
               if (!currentRun.sourceFeatures.any2StringAdd)
                 runReporting.warning(qual.pos, s"Converting to String for concatenation is not supported in Scala 3 (or with -Xsource-features:any2stringadd).", Scala3Migration, coercion.symbol)
+            if (settings.lintUniversalMethods) {
+              def targetsUniversalMember(target: => Type): Option[Symbol] = searchTemplate match {
+                case HasMethodMatching(name, argtpes, restpe) =>
+                  target.member(name)
+                   .alternatives
+                   .find { m =>
+                      def argsOK = m.paramLists match {
+                        case h :: _ => argtpes.corresponds(h.map(_.info))(_ <:< _)
+                        case nil    => argtpes.isEmpty
+                      }
+                      isUniversalMember(m) && argsOK
+                   }
+                case RefinedType(WildcardType :: Nil, decls) =>
+                  decls.find(d => d.isMethod && d.info == WildcardType && isUniversalMember(target.member(d.name)))
+                case _ =>
+                  None
+              }
+              for (target <- targetsUniversalMember(coercion.symbol.info.finalResultType))
+                context.warning(qual.pos, s"conversion ${coercion.symbol.nameString} adds universal member $target to ${qual.tpe.typeSymbol}",
+                  WarningCategory.LintUniversalMethods)
+            }
             typedQualifier(atPos(qual.pos)(new ApplyImplicitView(coercion, List(qual))))
         }
       }
