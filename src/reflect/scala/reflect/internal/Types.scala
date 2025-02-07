@@ -152,7 +152,6 @@ trait Types
     override def params = underlying.params
     override def paramTypes = underlying.paramTypes
     override def termSymbol = underlying.termSymbol
-    override def termSymbolDirect = underlying.termSymbolDirect
     override def typeParams = underlying.typeParams
     override def typeSymbol = underlying.typeSymbol
     override def typeSymbolDirect = underlying.typeSymbolDirect
@@ -329,10 +328,6 @@ trait Types
       * tp.sym, due to normalization.
       */
     def typeSymbol: Symbol = NoSymbol
-
-    /** The term symbol ''directly'' associated with the type.
-     */
-    def termSymbolDirect: Symbol = termSymbol
 
     /** The type symbol ''directly'' associated with the type.
      *  In other words, no normalization is performed: if this is an alias type,
@@ -2580,7 +2575,6 @@ trait Types
     override def prefix           = pre
     override def prefixDirect     = pre
     override def termSymbol       = super.termSymbol
-    override def termSymbolDirect = super.termSymbol
     override def typeArgs         = args
     override def typeOfThis       = relativize(sym.typeOfThis)
     override def typeSymbol       = sym
