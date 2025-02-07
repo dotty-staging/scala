@@ -819,7 +819,9 @@ trait ContextErrors extends splain.SplainErrors {
         val advice =
           if (meth.isConstructor || meth.info.params.lengthIs > definitions.MaxFunctionArity) ""
           else s"""
-            |Unapplied methods are only converted to functions when a function type is expected.
+            |Unapplied methods are only converted to functions when a function type is expected.${
+              if (!currentRun.isScala3) "" else """
+            |Use -Xsource-features:eta-expand-always to convert even if the expected type is not a function type."""}
             |You can make this conversion explicit by writing `$f _` or `$paf` instead of `$f`.""".stripMargin
         val message =
           if (meth.isMacro) MacroTooFewArgumentListsMessage

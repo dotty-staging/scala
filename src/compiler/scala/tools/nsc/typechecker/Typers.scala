@@ -873,7 +873,7 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
           if (arity == 0)
             expectingFunctionOfArity && warnEtaZero()
           else
-            expectingFunctionOfArity || expectingSamOfArity && warnEtaSam() || currentRun.isScala3
+            expectingFunctionOfArity || expectingSamOfArity && warnEtaSam() || currentRun.sourceFeatures.etaExpandAlways
         }
 
         def matchNullaryLoosely: Boolean = {
@@ -906,10 +906,11 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
           val apply = Apply(tree, Nil).setPos(tree.pos).updateAttachment(AutoApplicationAttachment)
           if (tree.hasAttachment[PostfixAttachment.type]) apply.updateAttachment(InfixAttachment)
           adapt(typed(apply), mode, pt, original)
-        } else
-          if (context.implicitsEnabled) MissingArgsForMethodTpeError(tree, meth) // `context.implicitsEnabled` implies we are not in a pattern
-          else UnstableTreeError(tree)
-      }
+        }
+        // `context.implicitsEnabled` implies we are not in a pattern
+        else if (context.implicitsEnabled) MissingArgsForMethodTpeError(tree, meth)
+        else UnstableTreeError(tree)
+      } // end adaptMethodTypeToExpr
 
       def adaptType(): Tree = {
         // @M When not typing a type constructor (!context.inTypeConstructorAllowed)
