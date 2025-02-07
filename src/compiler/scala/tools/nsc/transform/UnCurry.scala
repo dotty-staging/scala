@@ -83,8 +83,7 @@ abstract class UnCurry extends InfoTransform
     private val noApply           = mutable.HashSet[Tree]()
     private val newMembers        = mutable.Map[Symbol, mutable.Buffer[Tree]]()
 
-    // Expand `Function`s in constructors to class instance creation (scala/bug#6666, scala/bug#8363)
-    // We use Java's LambdaMetaFactory (LMF), which requires an interface for the sam's owner
+    // Expand `Function`s that are not suitable for Java's LambdaMetaFactory (LMF)
     private def mustExpandFunction(fun: Function) = {
       // (TODO: Can't use isInterface, yet, as it hasn't been updated for the new trait encoding)
       val canUseLambdaMetaFactory = (fun.attachments.get[SAMFunction] match {
@@ -221,7 +220,7 @@ abstract class UnCurry extends InfoTransform
       // because we know `cbn` will already be a `Function0` thunk. When we're targeting a SAM,
       // the types don't align and we must preserve the function wrapper.
       if (fun.vparams.isEmpty && isByNameRef(fun.body) && fun.attachments.get[SAMFunction].isEmpty) { noApply += fun.body ; fun.body }
-      else if (forceExpandFunction || inConstructorFlag != 0) {
+      else if (forceExpandFunction) {
         // Expand the function body into an anonymous class
         gen.expandFunction(localTyper)(fun, inConstructorFlag)
       } else {
