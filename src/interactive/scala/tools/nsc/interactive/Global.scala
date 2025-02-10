@@ -1268,20 +1268,16 @@ class Global(settings: Settings, _reporter: Reporter, projectName: String = "") 
             typeCompletions(imp, qual, selector.namePos, selector.name)
         }
       case sel@Select(qual, name) =>
-        val qualPos = qual.pos
-        val effectiveQualEnd = if (qualPos.isRange) qualPos.end else qualPos.point - 1
-        def fallback = {
-          effectiveQualEnd + 2
-        }
-        val source = pos.source
-
-        val nameStart: Int = (focus1.pos.end - 1 to effectiveQualEnd by -1).find(p =>
-          source.identFrom(source.position(p)).exists(_.length == 0)
-        ).map(_ + 1).getOrElse(fallback)
+        val rawNameStart: Int = sel.pos.point
+        val hasBackTick = pos.source.content.lift(rawNameStart).contains('`')
+        val nameStart = if (hasBackTick) rawNameStart + 1 else rawNameStart
         typeCompletions(sel, qual, nameStart, name)
-      case Ident(name) =>
+      case ident@Ident(name) =>
         val allMembers = scopeMembers(pos)
-        val positionDelta: Int = pos.start - focus1.pos.start
+        val rawNameStart: Int = ident.pos.point
+        val hasBackTick = pos.source.content.lift(rawNameStart).contains('`')
+        val nameStart = if (hasBackTick) rawNameStart + 1 else rawNameStart
+        val positionDelta: Int = pos.start - nameStart
         val subName = name.subName(0, positionDelta)
         CompletionResult.ScopeMembers(positionDelta, scopeMemberFlatten(allMembers), subName, forImport = false)
       case _ =>
