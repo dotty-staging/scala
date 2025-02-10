@@ -2170,6 +2170,8 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
           } else tpt1.tpe
           transformedOrTyped(vdef.rhs, EXPRmode | BYVALmode, tpt2)
         }
+      if (!isPastTyper && sym.hasDefault && sym.owner.isConstructor && sym.enclClass.isNonBottomSubClass(AnnotationClass))
+        sym.addAnnotation(AnnotationInfo(DefaultArgAttr.tpe, List(duplicateAndResetPos.transform(rhs1)), Nil))
       val vdef1 = treeCopy.ValDef(vdef, typedMods, sym.name, tpt1, checkDead(context, rhs1)) setType NoType
       if (sym.isSynthetic && sym.name.startsWith(nme.RIGHT_ASSOC_OP_PREFIX))
         rightAssocValDefs += ((sym, vdef1.rhs))
@@ -2374,6 +2376,42 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
         meth.annotations.foreach(_.completeInfo())
         // we only have to move annotations around for accessors -- see annotSig as used by AccessorTypeCompleter and ValTypeCompleter
         if (meth.isAccessor) meth.filterAnnotations(_ != UnmappableAnnotation)
+
+        if (meth.isPrimaryConstructor && !isPastTyper) {
+          // add `@superArg` / `@superFwdArg` to subclasses of concrete annotations, e.g.,
+          // `@superArg("value", "cat=deprecation")` for `class nodep extends nowarn("cat=deprecation")`
+          // this is done by duplicating the untyped super arguments before type checking the super call, because the
+          // super call can be transformed by named/default arguments. to build the `@superArg` annotations, the super
+          // call is type checked using `typedAnnotation`, which uses Mode.ANNOTmode.
+          def superArgs(t: Tree): List[Tree] = t match {
+            case treeInfo.Application(fn, _, List(args)) => args.map(_.duplicate)
+            case Block(_ :+ superCall, _) => superArgs(superCall)
+            case _ => Nil
+          }
+          val cls = meth.enclClass
+          val supCls = cls.superClass
+          if (!supCls.isAbstract && supCls.isNonBottomSubClass(AnnotationClass)) {
+            val superAnnotArgs = superArgs(ddef.rhs)
+            if (superAnnotArgs.nonEmpty && supCls.primaryConstructor.paramss.size == 1)
+              silent(_.typedAnnotation(New(cls.info.parents.head, superAnnotArgs: _*), None)).map(i => {
+                if (supCls.isNonBottomSubClass(ConstantAnnotationClass)) {
+                  i.assocs.foreach {
+                    case (p, LiteralAnnotArg(arg)) =>
+                      cls.addAnnotation(AnnotationInfo(SuperArgAttr.tpe, List(CODE.LIT.typed(p.toString), CODE.LIT.typed(arg.value)), Nil))
+                    case _ =>
+                  }
+                } else {
+                  val ps = vparamss1.headOption.getOrElse(Nil).map(_.symbol).toSet
+                  i.symbol.primaryConstructor.paramss.headOption.getOrElse(Nil).zip(i.args).foreach {
+                    case (p, arg) if ps(arg.symbol) =>
+                      cls.addAnnotation(AnnotationInfo(SuperFwdArgAttr.tpe, List(CODE.LIT.typed(p.name.toString), CODE.LIT.typed(arg.symbol.name.toString)), Nil))
+                    case (p, arg) =>
+                      cls.addAnnotation(AnnotationInfo(SuperArgAttr.tpe, List(CODE.LIT.typed(p.name.toString), arg), Nil))
+                  }
+                }
+              })
+          }
+        }
 
         for (vparams1 <- vparamss1; vparam1 <- vparams1 dropRight 1)
           if (isRepeatedParamType(vparam1.symbol.tpe))
@@ -3800,7 +3838,7 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
                     true
                   case _ => false
                 }
-                val (allArgs, missing) = addDefaults(args, qual, targs, previousArgss, params, fun.pos.focus, context)
+                val (allArgs, missing) = addDefaults(args, qual, targs, previousArgss, params, fun.pos.focus, context, mode)
                 val funSym = fun1 match { case Block(_, expr) => expr.symbol case x => throw new MatchError(x) }
                 val lencmp2 = compareLengths(allArgs, formals)
 
@@ -4003,7 +4041,7 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
       def registerNowarn(info: AnnotationInfo): Unit = {
         if (annotee.isDefined && NowarnClass.exists && info.matches(NowarnClass) && !runReporting.suppressionExists(info.pos)) {
           var verbose = false
-          val filters = (info.assocs: @unchecked) match {
+          val filters = (info.assocsForSuper(NowarnClass): @unchecked) match {
             case Nil => List(MessageFilter.Any)
             case (_, LiteralAnnotArg(s)) :: Nil =>
               val str = s.stringValue
@@ -4079,6 +4117,8 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
           }
         }
 
+        // Usually, defaults are the default expression ASTs, but only for annotations compiled with a recent compiler
+        // that have `annotation.meta.defaultArg` meta annotations on them.
         def isDefaultArg(tree: Tree) = tree match {
           case treeInfo.Applied(fun, _, _) => fun.symbol != null && fun.symbol.isDefaultGetter
           case _ => false
@@ -4211,21 +4251,15 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
         val typedAnn: Tree = {
           // local dummy fixes scala/bug#5544
           val localTyper = newTyper(context.make(ann, context.owner.newLocalDummy(ann.pos)))
-          localTyper.typed(ann, mode)
+          localTyper.typed(ann, mode | ANNOTmode)
         }
         @tailrec
         def annInfo(t: Tree): AnnotationInfo = t match {
+          case Block(Nil, expr) => annInfo(expr)
+
           case Apply(Select(New(tpt), nme.CONSTRUCTOR), args) =>
             // `tpt.tpe` is more precise than `annType`, since it incorporates the types of `args`
             AnnotationInfo(tpt.tpe, args, Nil).setOriginal(typedAnn).setPos(t.pos)
-
-          case Block(_, expr) =>
-            if (!annTypeSym.isNonBottomSubClass(ConstantAnnotationClass))
-              context.warning(t.pos, "Usage of named or default arguments transformed this annotation\n"+
-                                "constructor call into a block. The corresponding AnnotationInfo\n"+
-                                "will contain references to local values and default getters instead\n"+
-                                "of the actual argument trees", WarningCategory.Other)
-            annInfo(expr)
 
           case Apply(fun, args) =>
             context.warning(t.pos, "Implementation limitation: multiple argument lists on annotations are\n"+

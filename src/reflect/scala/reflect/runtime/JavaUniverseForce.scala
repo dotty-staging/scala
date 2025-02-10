@@ -471,6 +471,7 @@ trait JavaUniverseForce { self: runtime.JavaUniverse  =>
     definitions.BeanPropertyAttr
     definitions.BooleanBeanPropertyAttr
     definitions.CompileTimeOnlyAttr
+    definitions.DefaultArgAttr
     definitions.DeprecatedAttr
     definitions.DeprecatedNameAttr
     definitions.DeprecatedInheritanceAttr
@@ -481,6 +482,8 @@ trait JavaUniverseForce { self: runtime.JavaUniverse  =>
     definitions.SerialVersionUIDAttr
     definitions.SerialVersionUIDAnnotation
     definitions.SpecializedClass
+    definitions.SuperArgAttr
+    definitions.SuperFwdArgAttr
     definitions.ThrowsClass
     definitions.TransientAttr
     definitions.UncheckedClass

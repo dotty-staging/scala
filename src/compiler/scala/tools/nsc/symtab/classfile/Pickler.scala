@@ -369,7 +369,7 @@ abstract class Pickler extends SubComponent {
       // annotations in Modifiers are removed by the typechecker
       override def traverseModifiers(mods: Modifiers): Unit = if (putEntry(mods)) putEntry(mods.privateWithin)
       override def traverseName(name: Name): Unit           = putEntry(name)
-      override def traverseConstant(const: Constant): Unit  = putEntry(const)
+      override def traverseConstant(const: Constant): Unit  = putConstant(const)
       override def traverse(tree: Tree): Unit               = putTree(tree)
 
       def put(tree: Tree): Unit = {
@@ -418,7 +418,8 @@ abstract class Pickler extends SubComponent {
     private def putAnnotationBody(annot: AnnotationInfo): Unit = {
       def putAnnotArg(arg: Tree): Unit = {
         arg match {
-          case Literal(c) => putConstant(c)
+          // Keep Literal with an AnnotatedType. Used in AnnotationInfo.argIsDefault.
+          case Literal(c) if arg.tpe.isInstanceOf[ConstantType] => putConstant(c)
           case _ => putTree(arg)
         }
       }
@@ -475,7 +476,8 @@ abstract class Pickler extends SubComponent {
     private def writeAnnotation(annot: AnnotationInfo): Unit = {
       def writeAnnotArg(arg: Tree): Unit = {
         arg match {
-          case Literal(c) => writeRef(c)
+          // Keep Literal with an AnnotatedType. Used in AnnotationInfo.argIsDefault.
+          case Literal(c) if arg.tpe.isInstanceOf[ConstantType] => writeRef(c)
           case _ => writeRef(arg)
         }
       }
