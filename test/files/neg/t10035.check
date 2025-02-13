@@ -1,4 +1,0 @@
-t10035.scala:7: error: Implementation restriction: <$anon: Inner> requires premature access to class Outer.
-    case k => new Inner {
-                  ^
-1 error
