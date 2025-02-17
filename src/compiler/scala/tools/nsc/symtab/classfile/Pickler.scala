@@ -418,8 +418,9 @@ abstract class Pickler extends SubComponent {
     private def putAnnotationBody(annot: AnnotationInfo): Unit = {
       def putAnnotArg(arg: Tree): Unit = {
         arg match {
-          // Keep Literal with an AnnotatedType. Used in AnnotationInfo.argIsDefault.
-          case Literal(c) if arg.tpe.isInstanceOf[ConstantType] => putConstant(c)
+          // Keep Literal with an AnnotatedType. Used in AnnotationInfo.argIsDefault. Allow `null` to prevent NPEs:
+          // Literal(Constant(v)) is used eg in compiler plugins, it produces a tree with `tpe == null`.
+          case Literal(c) if arg.tpe == null || arg.tpe.isInstanceOf[ConstantType] => putConstant(c)
           case _ => putTree(arg)
         }
       }
@@ -476,8 +477,9 @@ abstract class Pickler extends SubComponent {
     private def writeAnnotation(annot: AnnotationInfo): Unit = {
       def writeAnnotArg(arg: Tree): Unit = {
         arg match {
-          // Keep Literal with an AnnotatedType. Used in AnnotationInfo.argIsDefault.
-          case Literal(c) if arg.tpe.isInstanceOf[ConstantType] => writeRef(c)
+          // Keep Literal with an AnnotatedType. Used in AnnotationInfo.argIsDefault. Allow `null` to prevent NPEs:
+          // Literal(Constant(v)) is used eg in compiler plugins, it produces a tree with `tpe == null`.
+          case Literal(c) if arg.tpe == null || arg.tpe.isInstanceOf[ConstantType] => writeRef(c)
           case _ => writeRef(arg)
         }
       }
