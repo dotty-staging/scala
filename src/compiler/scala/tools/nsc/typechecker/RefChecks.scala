@@ -1019,6 +1019,8 @@ abstract class RefChecks extends Transform {
       def underlyingClass(tp: Type): Symbol = {
         val sym = tp.widen.typeSymbol
         if (sym.isAbstractType) underlyingClass(sym.info.upperBound)
+        // could be smarter than picking the first parent, but refined / intersection types are not that common
+        else if (sym.isRefinementClass) sym.parentSymbols.headOption.getOrElse(AnyClass)
         else sym
       }
       val actual   = underlyingClass(other.tpe)
