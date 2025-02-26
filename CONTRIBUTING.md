@@ -8,7 +8,7 @@ You're always welcome to submit your PR straight away and start the discussion (
 
 Regardless of the nature of your Pull Request, we have to ask you to digitally sign the [Scala CLA](https://contribute.akka.io/cla/scala), to protect the OSS nature of the code base.
 
-You don't need to submit separate PRs for 2.12.x and 2.13.x. Any change accepted on 2.12.x will, in time, be merged onto 2.13.x too. (We are no longer accepting PRs for 2.11.x.)
+You don't need to submit separate PRs for 2.12.x and 2.13.x. Any change accepted on 2.12.x will, in time, be merged onto 2.13.x too.
 
 ### Documentation
 
@@ -22,7 +22,7 @@ For bigger documentation changes, you may want to poll contributors.scala-lang.o
 
 For bigger changes, we do recommend announcing your intentions on contributors.scala-lang.org first, to avoid duplicated effort, or spending a lot of time reworking something we are not able to change at this time in the release cycle, for example.
 
-The kind of code we can accept depends on the life cycle for the release you're targeting. The current maintenance release (2.12.x) cannot break source/binary compatibility, which means public APIs cannot change. It also means we are reluctant to change, e.g., type inference or implicit search, as this can have unforeseen consequences for source compatibility.
+The kind of code we can accept depends on the life cycle for the release you're targeting. The current maintenance release (2.13.x) cannot break source/binary compatibility, which means public APIs cannot change. It also means we are reluctant to change, e.g., type inference or implicit search, as this can have unforeseen consequences for source compatibility.
 
 #### Bug Fix
 
@@ -258,7 +258,7 @@ say so.
 
 Backports should be tagged as "[backport]".
 
-When working on maintenance branches (e.g., 2.12.x), include "[nomerge]"
+When working on older maintenance branches (namely 2.12.x), include "[nomerge]"
 if this commit should not be merged forward into the next release
 branch.
 
