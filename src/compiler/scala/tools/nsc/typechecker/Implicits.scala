@@ -140,9 +140,16 @@ trait Implicits extends splain.SplainData {
           if (rts.isAccessor) rts.accessed
           else if (rts.isModule) rts.moduleClass
           else rts
+        def wrapped = {
+          val sym = tree match {
+            case NamedApplyBlock(i) => i.original.symbol
+            case t => t.symbol
+          }
+          if (sym == null) "expression" else if (sym.isMethod) s"result of $sym" else sym.toString
+        }
         val rtsIsImplicitWrapper = isView && rts.isMethod && rts.isSynthetic && rts.isImplicit
         def isSelfEnrichment(encl: Symbol): Boolean =
-          tree.symbol.isParamAccessor && tree.symbol.owner == encl && !encl.isDerivedValueClass
+          Option(tree.symbol).exists(s => s.isParamAccessor && s.owner == encl && !encl.isDerivedValueClass)
         def targetsUniversalMember(target: => Type): Boolean = cond(pt) {
           case TypeRef(pre, sym, _ :: RefinedType(WildcardType :: Nil, decls) :: Nil) =>
             sym == FunctionClass(1) &&
@@ -159,18 +166,18 @@ trait Implicits extends splain.SplainData {
             if (!encl.isClass) {
               doWarn = true
               if (encl.isMethod && targetsUniversalMember(encl.info.finalResultType))
-                help = s"; the conversion adds a member of AnyRef to ${tree.symbol}"
+                help = s"; the conversion adds a member of AnyRef to $wrapped"
             }
             else if (encl.isModuleClass) {
               doWarn = true
             }
             else if (isSelfEnrichment(encl)) {
               doWarn = true
-              help = s"; the enrichment wraps ${tree.symbol}"
+              help = s"; the enrichment wraps $wrapped"
             }
             else if (targetsUniversalMember(encl.info)) {
               doWarn = true
-              help = s"; the conversion adds a member of AnyRef to ${tree.symbol}"
+              help = s"; the conversion adds a member of AnyRef to $wrapped"
             }
             if (doWarn)
               context.warning(result.tree.pos, s"Implicit resolves to enclosing $encl$help", WFlagSelfImplicit)
