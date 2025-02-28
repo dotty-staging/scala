@@ -55,11 +55,6 @@ abstract class TreeBuilder {
   def makeSelfDef(name: TermName, tpt: Tree): ValDef =
     ValDef(Modifiers(PRIVATE), name, tpt, EmptyTree)
 
-  /** Tree for `od op`, start is start0 if od.pos is borked. */
-  def makePostfixSelect(start: Int, end: Int, od: Tree, op: Name): Tree = {
-    atPos(r2p(start, end, end + op.length)) { Select(od, op.encode) }.updateAttachment(PostfixAttachment)
-  }
-
   /** Create tree representing a while loop */
   def makeWhile(startPos: Int, cond: Tree, body: Tree): Tree = {
     val lname = freshTermName(nme.WHILE_PREFIX)

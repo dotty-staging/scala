@@ -156,7 +156,7 @@ self =>
   val global: Global
   import global._
 
-  case class OpInfo(lhs: Tree, operator: TermName, targs: List[Tree], offset: Offset) {
+  case class OpInfo(lhs: Tree, operator: TermName, targs: List[Tree], operatorPos: Position, targsPos: Position) {
     def precedence = Precedence(operator.toString)
   }
 
@@ -930,55 +930,6 @@ self =>
       case _ => t
     }
 
-    /** Create tree representing (unencoded) binary operation expression or pattern. */
-    def makeBinop(isExpr: Boolean, left: Tree, op: TermName, right: Tree, opPos: Position, targs: List[Tree] = Nil): Tree = {
-      require(isExpr || targs.isEmpty || targs.exists(_.isErroneous),
-        s"Incompatible args to makeBinop: !isExpr but targs=$targs")
-
-      val rightAssoc = !nme.isLeftAssoc(op)
-
-      def mkSelection(t: Tree) = {
-        val pos = (opPos union t.pos) makeTransparentIf rightAssoc
-        val sel = atPos(pos)(Select(stripParens(t), op.encode))
-        if (targs.isEmpty) sel
-        else {
-          /* if it's right-associative, `targs` are between `op` and `t` so make the pos transparent */
-          atPos((pos union targs.last.pos) makeTransparentIf rightAssoc) {
-            TypeApply(sel, targs)
-          }
-        }
-      }
-      def mkNamed(args: List[Tree]) = if (!isExpr) args else
-        args.map(treeInfo.assignmentToMaybeNamedArg(_))
-          .tap(res => if (currentRun.isScala3 && args.lengthCompare(1) == 0 && (args.head ne res.head))
-            deprecationWarning(args.head.pos.point, "named argument is deprecated for infix syntax", since="2.13.16"))
-      var isMultiarg = false
-      val arguments = right match {
-        case Parens(Nil)               => literalUnit :: Nil
-        case Parens(args @ (_ :: Nil)) => mkNamed(args)
-        case Parens(args)              => isMultiarg = true ; mkNamed(args)
-        case _                         => right :: Nil
-      }
-      def mkApply(fun: Tree, args: List[Tree]) = {
-        val apply = Apply(fun, args).updateAttachment(InfixAttachment)
-        if (isMultiarg) apply.updateAttachment(MultiargInfixAttachment)
-        apply
-      }
-      if (isExpr) {
-        if (rightAssoc) {
-          import symtab.Flags._
-          val x = freshTermName(nme.RIGHT_ASSOC_OP_PREFIX)
-          val liftedArg = atPos(left.pos) {
-            ValDef(Modifiers(FINAL | SYNTHETIC | ARTIFACT), x, TypeTree(), stripParens(left))
-          }
-          val apply = mkApply(mkSelection(right), List(Ident(x) setPos left.pos.focus))
-          Block(liftedArg :: Nil, apply)
-        } else
-          mkApply(mkSelection(left), arguments)
-      } else
-        mkApply(Ident(op.encode), stripParens(left) :: arguments)
-    }
-
     /** Is current ident a `*`, and is it followed by a `)` or `, )`? */
     def followingIsScala3Vararg(): Boolean =
       currentRun.isScala3 && isRawStar && lookingAhead {
@@ -1005,15 +956,18 @@ self =>
     private def headPrecedence = opHead.precedence
     private def popOpInfo(): OpInfo = try opHead finally opstack = opstack.tail
     private def pushOpInfo(top: Tree): Unit = {
-      val name   = in.name
-      val offset = in.offset
+      val name = in.name
+      val nameStart = in.offset
       ident()
+      val operatorPos = Position.range(source, nameStart, nameStart, in.lastOffset) //offset + operator.length)
+      val targsStart = in.offset
       val targs = if (in.token == LBRACKET) exprTypeArgs() else Nil
-      val opinfo = OpInfo(top, name, targs, offset)
+      val targsPos = if (targs.nonEmpty) Position.range(source, targsStart, targsStart, in.lastOffset) else NoPosition
+      val opinfo = OpInfo(top, name, targs, operatorPos, targsPos)
       opstack ::= opinfo
     }
 
-    def checkHeadAssoc(leftAssoc: Boolean) = checkAssoc(opHead.offset, opHead.operator, leftAssoc)
+    def checkHeadAssoc(leftAssoc: Boolean) = checkAssoc(opHead.operatorPos.point, opHead.operator, leftAssoc)
     def checkAssoc(offset: Offset, op: Name, leftAssoc: Boolean) = (
       if (nme.isLeftAssoc(op) != leftAssoc)
         syntaxError(offset, "left- and right-associative operators with same precedence may not be mixed", skipIt = false)
@@ -1021,38 +975,75 @@ self =>
 
     def finishPostfixOp(start: Int, base: List[OpInfo], opinfo: OpInfo): Tree = {
       if (opinfo.targs.nonEmpty)
-        syntaxError(opinfo.offset, "type application is not allowed for postfix operators")
+        syntaxError(opinfo.targsPos.point, "type application is not allowed for postfix operators")
 
       val lhs = reduceExprStack(base, opinfo.lhs)
-      makePostfixSelect(if (lhs.pos.isDefined) lhs.pos.start else start, opinfo.offset, stripParens(lhs), opinfo.operator)
+      val at = if (lhs.pos.isDefined) lhs.pos.start else start
+      atPos(opinfo.operatorPos.withStart(at)) {
+        Select(stripParens(lhs), opinfo.operator.encode).updateAttachment(PostfixAttachment)
+      }
     }
 
-    def finishBinaryOp(isExpr: Boolean, opinfo: OpInfo, rhs: Tree): Tree = {
-      import opinfo.{lhs, operator, targs, offset}
-      val operatorPos = Position.range(source, offset, offset, offset + operator.length)
-      val pos         = operatorPos.union(lhs.pos).union(rhs.pos).withEnd(in.lastOffset)
+    /** Create tree representing (unencoded) binary operation expression or pattern. */
+    def finishBinaryOp(isExpr: Boolean, opinfo: OpInfo, right: Tree): Tree = {
+      import opinfo.{lhs => left, operator, targs, operatorPos, targsPos}
+      val pos = operatorPos.union(left.pos).union(right.pos).withEnd(in.lastOffset)
 
       if (targs.nonEmpty) {
-        val qual = unit.source.sourceAt(lhs.pos)
-        val fun = s"${CodeAction.maybeWrapInParens(qual)}.${unit.source.sourceAt(operatorPos.withEnd(rhs.pos.start))}".trim
-        val fix = s"$fun${CodeAction.wrapInParens(unit.source.sourceAt(rhs.pos))}"
+        require(isExpr || targs.isEmpty || targs.exists(_.isErroneous), s"Binary op !isExpr but targs=$targs")
+        val qual = unit.source.sourceAt(left.pos)
+        val fun = s"${CodeAction.maybeWrapInParens(qual)}.${unit.source.sourceAt(operatorPos.withEnd(right.pos.start))}"
+        val fix = s"${fun.trim}${CodeAction.wrapInParens(unit.source.sourceAt(right.pos))}"
         val msg = "type application is not allowed for infix operators"
-        migrationWarning(offset, msg, /*since="2.13.11",*/ actions = runReporting.codeAction("use selection", pos, fix, msg))
+        // omit since="2.13.11" to avoid deprecation
+        migrationWarning(targsPos.point, msg, actions = runReporting.codeAction("use selection", pos, fix, msg))
       }
-      atPos(pos)(makeBinop(isExpr, lhs, operator, rhs, operatorPos, targs))
+      val rightAssoc = !nme.isLeftAssoc(operator)
+      def mkSelection(t: Tree) = {
+        // if it's right-associative, `targs` are between `op` and `t` so make the pos transparent
+        val selPos = operatorPos.union(t.pos).makeTransparentIf(rightAssoc)
+        val sel = atPos(selPos)(Select(stripParens(t), operator.encode))
+        if (targs.isEmpty) sel
+        else atPos(selPos.union(targsPos).makeTransparentIf(rightAssoc)) { TypeApply(sel, targs) }
+      }
+      def mkNamed(args: List[Tree]) = if (!isExpr) args else
+        args.map(treeInfo.assignmentToMaybeNamedArg(_))
+          .tap(res => if (currentRun.isScala3 && args.lengthCompare(1) == 0 && (args.head ne res.head))
+            deprecationWarning(args.head.pos.point, "named argument is deprecated for infix syntax", since="2.13.16"))
+      var isMultiarg = false
+      val arguments = right match {
+        case Parens(Nil)               => literalUnit :: Nil
+        case Parens(args @ (_ :: Nil)) => mkNamed(args)
+        case Parens(args)              => isMultiarg = true; mkNamed(args)
+        case _                         => right :: Nil
+      }
+      def mkApply(fun: Tree, args: List[Tree]) =
+        Apply(fun, args)
+          .updateAttachment(InfixAttachment)
+          .tap(apply => if (isMultiarg) apply.updateAttachment(MultiargInfixAttachment))
+      atPos(pos) {
+        if (!isExpr)
+          mkApply(Ident(operator.encode), stripParens(left) :: arguments)
+        else if (!rightAssoc)
+          mkApply(mkSelection(left), arguments)
+        else {
+          import symtab.Flags._
+          val x = freshTermName(nme.RIGHT_ASSOC_OP_PREFIX)
+          val liftedArg = atPos(left.pos) {
+            ValDef(Modifiers(FINAL | SYNTHETIC | ARTIFACT), x, TypeTree(), stripParens(left))
+          }
+          val apply = mkApply(mkSelection(right), List(Ident(x) setPos left.pos.focus))
+          Block(liftedArg :: Nil, apply)
+        }
+      }
     }
 
-    def reduceExprStack(base: List[OpInfo], top: Tree): Tree    = reduceStack(isExpr = true, base, top)
-    def reducePatternStack(base: List[OpInfo], top: Tree): Tree = reduceStack(isExpr = false, base, top)
+    def reduceExprStack(base: List[OpInfo], top: Tree): Tree = reduceStack(isExpr = true, base, top)
 
     def reduceStack(isExpr: Boolean, base: List[OpInfo], top: Tree): Tree = {
       val opPrecedence = if (isIdent) Precedence(in.name.toString) else Precedence(0)
-      val leftAssoc    = !isIdent || (nme isLeftAssoc in.name)
+      val leftAssoc    = !isIdent || nme.isLeftAssoc(in.name)
 
-      reduceStack(isExpr, base, top, opPrecedence, leftAssoc)
-    }
-
-    def reduceStack(isExpr: Boolean, base: List[OpInfo], top: Tree, opPrecedence: Precedence, leftAssoc: Boolean): Tree = {
       def isDone          = opstack == base
       def lowerPrecedence = !isDone && (opPrecedence < headPrecedence)
       def samePrecedence  = !isDone && (opPrecedence == headPrecedence)
@@ -1065,7 +1056,7 @@ self =>
       def loop(top: Tree): Tree = if (canReduce) {
         val info = popOpInfo()
         if (!isExpr && info.targs.nonEmpty) {
-          syntaxError(info.offset, "type application is not allowed in pattern")
+          syntaxError(info.targsPos.point, "type application is not allowed in pattern")
           info.targs.foreach(_.setType(ErrorType))
         }
         loop(finishBinaryOp(isExpr, info, top))
@@ -2261,8 +2252,8 @@ self =>
           }
           else EmptyTree
         @tailrec
-        def loop(top: Tree): Tree = reducePatternStack(base, top) match {
-          case next if isIdent && !isRawBar => pushOpInfo(next) ; loop(simplePattern(() => badPattern3()))
+        def loop(top: Tree): Tree = reduceStack(isExpr = false, base, top) match {
+          case next if isIdent && !isRawBar => pushOpInfo(next); loop(simplePattern(() => badPattern3()))
           case next                         => next
         }
         checkWildStar orElse stripParens(loop(top))
@@ -2273,9 +2264,9 @@ self =>
         def isDelimiter            = in.token == RPAREN || in.token == RBRACE
         def isCommaOrDelimiter     = isComma || isDelimiter
         val (isUnderscore, isStar) = opstack match {
-          case OpInfo(Ident(nme.WILDCARD), nme.STAR, _, _) :: _ => (true,   true)
-          case OpInfo(_, nme.STAR, _, _) :: _                   => (false,  true)
-          case _                                                => (false, false)
+          case OpInfo(Ident(nme.WILDCARD), nme.STAR, _, _, _) :: _ => (true,   true)
+          case OpInfo(_, nme.STAR, _, _, _) :: _                   => (false,  true)
+          case _                                                   => (false, false)
         }
         def isSeqPatternClose = isUnderscore && isStar && isSequenceOK && isDelimiter
         val preamble = "bad simple pattern:"
