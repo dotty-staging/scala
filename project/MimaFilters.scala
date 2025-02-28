@@ -54,6 +54,12 @@ object MimaFilters extends AutoPlugin {
     ProblemFilters.exclude[MissingClassProblem]("scala.collection.immutable.LazyList$MidEvaluation$"),
     ProblemFilters.exclude[MissingClassProblem]("scala.collection.immutable.LazyList$Uninitialized$"),
 
+    // scala/scala#11004
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.reflect.api.Annotations#AnnotationApi.argIsDefault"),
+    // A new abstract trait method is not binary compatible in principle, but `AnnotationApi` is only implemented by
+    // `AnnotationInfo`, both of which are in scala-reflect.jar. So this should never leak.
+    ProblemFilters.exclude[ReversedMissingMethodProblem]("scala.reflect.api.Annotations#AnnotationApi.argIsDefault"),
+
     // scala/scala#10976
     ProblemFilters.exclude[MissingClassProblem]("scala.annotation.meta.defaultArg"),
     ProblemFilters.exclude[MissingClassProblem]("scala.annotation.meta.superArg"),
