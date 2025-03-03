@@ -774,11 +774,18 @@ abstract class TreeGen {
 
   private def mkPatDef(mods: Modifiers, pat: Tree, rhs: Tree, rhsPos: Position, forFor: Boolean)(implicit fresh: FreshNameCreator): List[ValDef] = matchVarPattern(pat) match {
     case Some((name, tpt)) =>
-      atPos(pat.pos union rhsPos) {
+      atPos(pat.pos | rhsPos) {
         ValDef(mods, name.toTermName, tpt, rhs)
-          .tap(vd =>
-              if (forFor) propagatePatVarDefAttachments(pat, vd)
-              else propagateNoWarnAttachment(pat, vd))
+          .tap { vd =>
+            val namePos = pat match {
+              case id @ Ident(_) => id.pos
+              case Typed(id @ Ident(_), _) => id.pos
+              case pat => pat.pos
+            }
+            vd.updateAttachment(NamePos(namePos))
+            if (forFor) propagatePatVarDefAttachments(pat, vd)
+            else propagateNoWarnAttachment(pat, vd)
+          }
       } :: Nil
 
     case None =>
@@ -805,13 +812,13 @@ abstract class TreeGen {
         case Typed(expr, tpt) if !expr.isInstanceOf[Ident] =>
           val rhsTypedUnchecked =
             if (tpt.isEmpty) rhsUnchecked
-            else Typed(rhsUnchecked, tpt) setPos (rhsPos union tpt.pos)
+            else Typed(rhsUnchecked, tpt).setPos(rhsPos | tpt.pos)
           (expr, rhsTypedUnchecked)
         case ok =>
           (ok, rhsUnchecked)
       }
       val vars = getVariables(pat1)
-      val matchExpr = atPos((pat1.pos union rhsPos).makeTransparent) {
+      val matchExpr = atPos((pat1.pos | rhsPos).makeTransparent) {
         Match(
           rhs1,
           List(
@@ -821,27 +828,27 @@ abstract class TreeGen {
           ))
       }
       vars match {
-        case List((vname, tpt, pos, original)) =>
-          atPos(pat.pos union pos union rhsPos) {
+        case (vname, tpt, pos, original) :: Nil =>
+          atPos(pat.pos | pos | rhsPos) {
             ValDef(mods, vname.toTermName, tpt, matchExpr)
+              .updateAttachment(NamePos(pos))
               .tap(propagatePatVarDefAttachments(original, _))
           } :: Nil
         case _ =>
           val tmp = freshTermName()
-          val firstDef =
-            atPos(matchExpr.pos) {
-              val v = ValDef(Modifiers(PrivateLocal | SYNTHETIC | ARTIFACT | (mods.flags & LAZY)), tmp, TypeTree(), matchExpr)
-              if (vars.isEmpty) {
-                v.updateAttachment(PatVarDefAttachment)  // warn later if this introduces a Unit-valued field
+          val firstDef = atPos(matchExpr.pos) {
+            ValDef(Modifiers(PrivateLocal | SYNTHETIC | ARTIFACT | (mods.flags & LAZY)), tmp, TypeTree(), matchExpr)
+              .tap(vd => if (vars.isEmpty) {
+                vd.updateAttachment(PatVarDefAttachment)  // warn later if this introduces a Unit-valued field
                 if (mods.isImplicit)
                   currentRun.reporting.deprecationWarning(matchExpr.pos, "Implicit pattern definition binds no variables", since="2.13", "", "")
-              }
-              v
-            }
+              })
+          }
           var cnt = 0
           val restDefs = for ((vname, tpt, pos, original) <- vars) yield atPos(pos) {
             cnt += 1
-            ValDef(mods, vname.toTermName, tpt, Select(Ident(tmp), TermName("_" + cnt)))
+            ValDef(mods, vname.toTermName, tpt, Select(Ident(tmp), TermName(s"_$cnt")))
+              .updateAttachment(NamePos(pos))
               .tap(propagatePatVarDefAttachments(original, _))
           }
           firstDef :: restDefs
