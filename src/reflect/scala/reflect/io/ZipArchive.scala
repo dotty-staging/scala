@@ -276,8 +276,11 @@ final class FileZipArchive(file: JFile, release: Option[String]) extends ZipArch
         }
       }
     } finally {
-      if (!ZipArchive.closeZipFile)
+      if (ZipArchive.closeZipFile) {
+        zipFile.close()
+      } else {
         zipFilePool.release(zipFile)
+      }
     }
     root
   }
