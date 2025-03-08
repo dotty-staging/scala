@@ -774,6 +774,7 @@ trait StdNames {
     val copy: NameType                 = nameType("copy")
     val create: NameType               = nameType("create")
     val currentMirror: NameType        = nameType("currentMirror")
+    val curried: NameType              = nameType("curried")
     val delayedInit: NameType          = nameType("delayedInit")
     val delayedInitArg: NameType       = nameType("delayedInit$body")
     val dollarScope: NameType          = nameType("$scope")
