@@ -149,8 +149,6 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
     // requiring both the ACCESSOR and the SYNTHETIC bits to trigger the exemption
     private def isSyntheticAccessor(sym: Symbol) = sym.isAccessor && (!sym.isLazy || isPastTyper)
 
-    private def isFixable(name: Name) = name == nme.tupled || name == nme.curried
-
     // when type checking during erasure, generate erased types in spots that aren't transformed by erasure
     // (it erases in TypeTrees, but not in, e.g., the type a Function node)
     def phasedAppliedType(sym: Symbol, args: List[Type]) = {
@@ -5436,7 +5434,9 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
         }
 
       // If they try C.tupled, make it (C.apply _).tupled
-      def fixUpCaseTupled(tree: Tree, qual: Tree, name: Name, mode: Mode): Tree =
+      def fixUpCaseTupled(tree: Tree, qual: Tree, name: Name, mode: Mode): Tree = {
+        def isFixable(name: Name) = name == nme.tupled || name == nme.curried
+
         if (!isPastTyper && qual.symbol != null && qual.symbol.isModule && qual.symbol.companion.isCase &&
             context.undetparams.isEmpty && isFixable(name)) {
           val t2 = {
@@ -5452,6 +5452,7 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
           else EmptyTree
         }
         else EmptyTree
+      }
 
       /* Attribute a selection where `tree` is `qual.name`.
        * `qual` is already attributed.
