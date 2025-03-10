@@ -1,0 +1,9 @@
+t13095.scala:12: warning: pattern var z in object Main is never used
+  private val A(w, z) = A(42, 27) // warn
+                   ^
+t13095.scala:13: warning: pattern var r in object Main is never used
+  private[this] val A(q, r) = A(42, 27) // warn
+                         ^
+error: No warnings can be incurred under -Werror.
+2 warnings
+1 error

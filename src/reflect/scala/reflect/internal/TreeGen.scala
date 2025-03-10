@@ -693,10 +693,15 @@ abstract class TreeGen {
       Apply(Select(qual, meth).setPos(qual.pos).updateAttachment(ForAttachment),
         List(makeClosure(pos, pat, body))).setPos(pos)
 
-    /* If `pat` is not yet a `Bind` wrap it in one with a fresh name */
+    /* If `pat` is not yet a `Bind` wrap it in one with a fresh name.
+     * If the fresh patvar is for tupling in the desugared expression,
+     * it receives the transparent position of the pattern, so it is never warned about.
+     * Otherwise, add NoWarnAttachment.
+     */
     def makeBind(pat: Tree): Bind = pat match {
       case pat: Bind => pat
-      case _ => Bind(freshTermName(), pat).setPos(pat.pos).updateAttachment(NoWarnAttachment)
+      case _ => Bind(freshTermName(), pat).setPos(pat.pos)
+                .tap(bind => if (!bind.pos.isTransparent) bind.updateAttachment(NoWarnAttachment))
     }
 
     /* A reference to the name bound in Bind `pat`. */
@@ -864,19 +869,11 @@ abstract class TreeGen {
     else ValFrom(pat1, mkCheckIfRefutable(pat1, rhs)).setPos(pos)
   }
 
-  private def unwarnable(pat: Tree): pat.type = {
-    pat foreach {
-      case b @ Bind(_, _) => b.updateAttachment(NoWarnAttachment)
-      case _ =>
-    }
-    pat
-  }
-
   def mkCheckIfRefutable(pat: Tree, rhs: Tree)(implicit fresh: FreshNameCreator) =
     if (treeInfo.isVarPatternDeep(pat)) rhs
     else {
       val cases = List(
-        CaseDef(unwarnable(pat.duplicate), EmptyTree, Literal(Constant(true))),
+        CaseDef(pat.duplicate, EmptyTree, Literal(Constant(true))),
         CaseDef(Ident(nme.WILDCARD), EmptyTree, Literal(Constant(false)))
       )
       val visitor = mkVisitor(cases, checkExhaustive = false, nme.CHECK_IF_REFUTABLE_STRING)
@@ -919,7 +916,7 @@ abstract class TreeGen {
       else {
         val start = tree.pos.start
         val end = start + name.decode.length
-        rangePos(tree.pos.source, start, start, end) // Bind should get NamePos in parser
+        rangePos(tree.pos.source, start = start, point = start, end = end) // Bind should get NamePos in parser
       }
 
     override def traverse(tree: Tree): Unit = {

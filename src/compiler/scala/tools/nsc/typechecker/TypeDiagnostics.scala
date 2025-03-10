@@ -498,21 +498,32 @@ trait TypeDiagnostics extends splain.SplainDiagnostics {
 
     // ValDef was a PatVarDef `val P(x) = ???`
     private def wasPatVarDef(tree: ValDef): Boolean = tree.hasAttachment[PatVarDefAttachment.type]
+    private def wasPatVarDef(sym: Symbol): Boolean = sym.hasAttachment[PatVarDefAttachment.type]
   }
 
   class UnusedPrivates extends Traverser {
     import UnusedPrivates.{ignoreNames, nowarn, wasPatVarDef}
-    def isEffectivelyPrivate(sym: Symbol): Boolean = false
+    def isEffectivelyPrivate(sym: Symbol): Boolean = false // see REPL
     val defnTrees = ListBuffer.empty[MemberDef]
     val targets   = mutable.Set.empty[Symbol]
     val setVars   = mutable.Set.empty[Symbol]
     val treeTypes = mutable.Set.empty[Type]
     val params    = mutable.Set.empty[Symbol]
     val patvars   = ListBuffer.empty[Tree /*Bind|ValDef*/]
+    val ignore    = mutable.Set.empty[Symbol] // nowarn
 
     val annots    = mutable.Set.empty[AnnotationInfo] // avoid revisiting annotations of symbols and types
 
     def recordReference(sym: Symbol): Unit = targets.addOne(sym)
+
+    def checkNowarn(tree: Tree): Unit =
+      tree match {
+        case tree: Bind =>
+          if (nowarn(tree)) ignore += tree.symbol
+        case tree: ValDef =>
+          if (nowarn(tree)) ignore += tree.symbol
+        case _ =>
+      }
 
     def qualifiesTerm(sym: Symbol) = (
       (sym.isModule || sym.isMethod || sym.isPrivateLocal || sym.isLocalToBlock || isEffectivelyPrivate(sym))
@@ -528,41 +539,60 @@ trait TypeDiagnostics extends splain.SplainDiagnostics {
         && (sym.isTerm && qualifiesTerm(sym) || sym.isType && qualifiesType(sym))
       )
     def isExisting(sym: Symbol) = sym != null && sym.exists
-    def addPatVar(t: Tree) = patvars += t
+    def addPatVar(t: Tree) = {
+      checkNowarn(t)
+      patvars += t
+    }
 
     // so trivial that it never consumes params
     def isTrivial(rhs: Tree): Boolean =
       rhs.symbol == Predef_??? || rhs.tpe == null || rhs.tpe =:= NothingTpe || (rhs match {
         case Literal(_) => true
-        case _          => isConstantType(rhs.tpe) || isSingleType(rhs.tpe)
+        case _          => isConstantType(rhs.tpe) || isSingleType(rhs.tpe) || rhs.isInstanceOf[This]
       })
 
     override def traverse(t: Tree): Unit = {
-      val sym = t.symbol
       t match {
-        case treeInfo.Applied(fun, _, _) if t.hasAttachment[ForAttachment.type] && fun.symbol != null && isTupleSymbol(fun.symbol.owner.companion) =>
-          return // ignore tupling of assignments
-        case m: MemberDef if qualifies(sym) && !t.isErrorTyped =>
+        case t: ValDef if wasPatVarDef(t) => // include field excluded by qualifies test
+          if (settings.warnUnusedPatVars)
+            addPatVar(t)
+        case t: MemberDef if qualifies(t.symbol) && !t.isErrorTyped =>
+          val sym = t.symbol
           t match {
-            case t: ValDef =>
-              if (wasPatVarDef(t)) {
-                if (settings.warnUnusedPatVars && !nowarn(t)) addPatVar(t)
-              }
-              else defnTrees += m
             case DefDef(_, _, _, vparamss, _, rhs) if !sym.isAbstract && !sym.isDeprecated && !sym.isMacro =>
-              if (isSuppressed(sym)) return
+              if (isSuppressed(sym)) return // ignore params and rhs of @unused def
               if (sym.isPrimaryConstructor)
                 for (cpa <- sym.owner.constrParamAccessors if cpa.isPrivateLocal) params += cpa
               else if (sym.isSynthetic && sym.isImplicit) return
               else if (!sym.isConstructor && !sym.isVar && !isTrivial(rhs))
                 for (vs <- vparamss; v <- vs) if (!isSingleType(v.symbol.tpe)) params += v.symbol
-              defnTrees += m
+              if (sym.isGetter && wasPatVarDef(sym.accessed)) {
+                if (settings.warnUnusedPatVars)
+                  addPatVar(t)
+              }
+              else defnTrees += t
             case TypeDef(_, _, _, _) =>
               if (!sym.isAbstract && !sym.isDeprecated)
-                defnTrees += m
+                defnTrees += t
             case _ =>
-              defnTrees += m
+              defnTrees += t
           }
+        case Match(selector, cases) =>
+          // don't warn when a patvar redefines the selector ident: x match { case x: X => }
+          def allowVariableBindings(n: Name, pat: Tree): Unit =
+            pat.foreach {
+              case bind @ Bind(`n`, _) => bind.updateAttachment(NoWarnAttachment)
+              case _ =>
+            }
+          def allow(n: Name): Unit = cases.foreach(k => allowVariableBindings(n, k.pat))
+          def loop(selector: Tree): Unit =
+            selector match {
+              case Ident(n) => allow(n)
+              case Typed(expr, _) => loop(expr)
+              case Select(This(_), n) => allow(n)
+              case _ =>
+            }
+          loop(selector)
         case CaseDef(pat, _, _) if settings.warnUnusedPatVars && !t.isErrorTyped =>
           def absolveVariableBindings(app: Apply, args: List[Tree]): Unit =
             treeInfo.dissectApplied(app).core.tpe match {
@@ -580,18 +610,30 @@ trait TypeDiagnostics extends splain.SplainDiagnostics {
             case _ =>
           }
           pat.foreach {
-            case b @ Bind(n, _) if !nowarn(b) && n != nme.DEFAULT_CASE => addPatVar(b)
+            case b @ Bind(n, _) if n != nme.DEFAULT_CASE => addPatVar(b)
             case _ =>
           }
-        case _: RefTree => if (isExisting(sym) && !currentOwner.hasTransOwner(sym)) recordReference(sym)
+        case t: RefTree =>
+          val sym = t.symbol
+          if (isExisting(sym) && !currentOwner.hasTransOwner(sym) && !t.hasAttachment[ForAttachment.type])
+            recordReference(sym)
         case Assign(lhs, _) if isExisting(lhs.symbol) => setVars += lhs.symbol
         case Function(ps, _) if !t.isErrorTyped =>
-          for (p <- ps)
+          for (p <- ps) {
             if (wasPatVarDef(p)) {
-              if (settings.warnUnusedPatVars && !nowarn(p))
+              if (settings.warnUnusedPatVars)
                 addPatVar(p)
             }
-            else if (settings.warnUnusedParams && !nowarn(p) && !p.symbol.isSynthetic) params += p.symbol
+            else {
+              if (settings.warnUnusedParams && !p.symbol.isSynthetic) {
+                checkNowarn(p)
+                params += p.symbol
+              }
+            }
+          }
+        case treeInfo.Applied(fun, _, _)
+        if t.hasAttachment[ForAttachment.type] && fun.symbol != null && isTupleSymbol(fun.symbol.owner.companion) =>
+          return // ignore tupling of assignments
         case Literal(_) =>
           t.attachments.get[OriginalTreeAttachment].foreach(ota => traverse(ota.original))
         case tt: TypeTree =>
@@ -638,8 +680,8 @@ trait TypeDiagnostics extends splain.SplainDiagnostics {
         }
       }
 
-      if (sym != null && sym.exists)
-        for (annot <- sym.annotations)
+      if (t.symbol != null && t.symbol.exists)
+        for (annot <- t.symbol.annotations)
           descend(annot)
 
       super.traverse(t)
@@ -679,6 +721,9 @@ trait TypeDiagnostics extends splain.SplainDiagnostics {
           targets.exists(s => s.isParameter
             && s.name == m.name && s.owner.isConstructor && s.owner.owner == m.owner) // exclude ctor params
         ))
+        && !(m.info.typeSymbol == UnitClass)
+        && !(m.owner.isClass && m.owner.thisType.baseClasses.contains(AnnotationClass))
+        && !ignore(m)
       )
     def unusedTypes = defnTrees.iterator.filter(t => isUnusedType(t.symbol))
     def unusedTerms = {
@@ -700,11 +745,36 @@ trait TypeDiagnostics extends splain.SplainDiagnostics {
     def unusedParams = params.iterator.filter(isUnusedParam)
     def inDefinedAt(p: Symbol) = p.owner.isMethod && p.owner.name == nme.isDefinedAt && p.owner.owner.isAnonymousFunction
     def unusedPatVars = {
-      // in elaboration of for comprehensions, patterns are duplicated; track a patvar by its start position; "original" has a range pos
-      val all = patvars.filterInPlace(_.pos.isDefined)
-      val byPos = all.groupBy(_.pos.start)
-      def isUnusedPatVar(t: Tree): Boolean = byPos(t.pos.start).forall(p => !targets(p.symbol))
-      all.iterator.filter(p => p.pos.isOpaqueRange && isUnusedTerm(p.symbol) && isUnusedPatVar(p) && !inDefinedAt(p.symbol))
+      // in elaboration of for comprehensions, patterns are duplicated;
+      // track a patvar by its symbol position; "original" has a range pos
+      val all = patvars.filterInPlace(_.symbol.pos.isDefined)
+      val byPos = all.groupBy(_.symbol.pos.start)
+      def isNotPrivateOrLocal(s: Symbol) = s.hasAccessorFlag && s.hasNoFlags(PRIVATE | LOCAL)
+      def isUnusedPatVar(t: Tree): Boolean =
+        byPos(t.symbol.pos.start).forall(p =>
+             !targets(p.symbol)
+          && !isNotPrivateOrLocal(p.symbol)
+          && !ignore(p.symbol)
+        )
+      // the "original" tree has an opaque range;
+      // for multi-var patdef, tree pos is transparent but sym pos is opaque;
+      // use the field as the primary definition, and also remove it from targets
+      // if it has a getter (in which case it has the "local" name to disambiguate).
+      // Note that for uni-var patdef `val Some(x)`, tree pos is opaque.
+      def isPrimaryPatVarDefinition(p: Tree): Boolean =
+        p.symbol.pos.isOpaqueRange && {
+          val primary = p.pos.isOpaqueRange || p.symbol.isPrivateLocal
+          if (primary && nme.isLocalName(p.symbol.name))
+            targets.subtractOne(p.symbol) // field is trivially accessed by its getter if it has one
+          primary
+        }
+      all.iterator.filter(p =>
+           isPrimaryPatVarDefinition(p)
+        && isUnusedTerm(p.symbol)
+        && isUnusedPatVar(p)
+        && !nme.isFreshTermName(p.symbol.name)
+        && !inDefinedAt(p.symbol)
+      )
     }
   }
 
@@ -822,7 +892,7 @@ trait TypeDiagnostics extends splain.SplainDiagnostics {
       }
       if (settings.warnUnusedPatVars)
         for (v <- unusedPrivates.unusedPatVars)
-          emitUnusedWarning(v.pos, s"pattern var ${v.symbol.name} in ${v.symbol.owner} is never used", WarningCategory.UnusedPatVars, v.symbol)
+          emitUnusedWarning(v.symbol.pos, s"pattern var ${v.symbol.name.dropLocal} in ${v.symbol.owner} is never used", WarningCategory.UnusedPatVars, v.symbol)
       if (settings.warnUnusedParams) {
         // don't warn unused args of overriding methods (or methods matching in self-type)
         def isImplementation(m: Symbol): Boolean = m.isMethod && {
