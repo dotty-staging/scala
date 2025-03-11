@@ -235,7 +235,6 @@ abstract class NodePrinters {
 
         case ld @ LabelDef(name, params, rhs) =>
           printMultiline(tree) {
-            print(showNameAndPos(ld))
             traverseList("()", "params")(params)
             traverse(rhs)
           }
