@@ -1010,7 +1010,7 @@ abstract class RefChecks extends Transform {
       *
       * NOTE: I'm really not convinced by the logic here. I also think this would work better after erasure.
       */
-    private def checkSensibleEquals(pos: Position, qual: Tree, name: Name, sym: Symbol, other: Tree) = {
+    private def checkSensibleEquals(pos: Position, qual: Tree, name: Name, sym: Symbol, other: Tree): Unit = {
       def isReferenceOp = sym == Object_eq || sym == Object_ne
       def isNew(tree: Tree) = tree match {
         case Function(_, _) | Apply(Select(New(_), nme.CONSTRUCTOR), _) => true
@@ -1019,14 +1019,16 @@ abstract class RefChecks extends Transform {
       def underlyingClass(tp: Type): Symbol = {
         val sym = tp.widen.typeSymbol
         if (sym.isAbstractType) underlyingClass(sym.info.upperBound)
-        // could be smarter than picking the first parent, but refined / intersection types are not that common
-        else if (sym.isRefinementClass) sym.parentSymbols.headOption.getOrElse(AnyClass)
         else sym
       }
       val actual   = underlyingClass(other.tpe)
       val receiver = underlyingClass(qual.tpe)
       def onTrees[T](f: List[Tree] => T) = f(List(qual, other))
       def onSyms[T](f: List[Symbol] => T) = f(List(receiver, actual))
+
+      // many parts of the implementation assume that `actual` and `receiver` are one `ClassSymbol`
+      // to support intersection types we'd need to work with lists of class symbols
+      if (onSyms(_.exists(_.isRefinementClass))) return
 
       // @MAT normalize for consistency in error message, otherwise only part is normalized due to use of `typeSymbol`
       def typesString = s"${normalizeAll(qual.tpe.widen)} and ${normalizeAll(other.tpe.widen)}"
