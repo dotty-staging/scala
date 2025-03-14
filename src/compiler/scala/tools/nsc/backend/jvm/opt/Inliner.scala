@@ -1010,6 +1010,8 @@ abstract class Inliner {
       Some(StrictfpMismatch(
         calleeDeclarationClass.internalName, callee.name, callee.desc, callsite.isInlineAnnotated,
         callsiteClass.internalName, callsiteMethod.name, callsiteMethod.desc))
+    } else if (callee.instructions.size == 0) {
+      Some(NoBytecode(calleeDeclarationClass.internalName, callee.name, callee.desc, callsite.isInlineAnnotated))
     } else
       None
   }
