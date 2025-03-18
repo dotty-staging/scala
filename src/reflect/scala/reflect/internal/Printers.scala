@@ -743,7 +743,6 @@ trait Printers extends api.Printers { self: SymbolTable =>
             case _ =>
           }
           printArgss(argss)
-        case _ => super.printTree(tree)
       }
     }
 
