@@ -127,6 +127,9 @@ class CompletionTest {
     checkExact(completer, "object X { def `Foo Bar` = 0; this.`Foo ", after = "` }")("Foo Bar")
     checkExact(completer, "val `Foo Bar` = 0; `Foo ", after = "`")("Foo Bar")
     checkExact(completer, "def foo(`Foo Bar`: Int) { `Foo ", after = "` }")("Foo Bar")
+    checkExact(completer, "def foo(`Foo Bar!`: Int) { `Foo ", after = "` }")("Foo Bar!")
+    checkExact(completer, "def foo(`Foo Bar$`: Int) { `Foo ", after = "` }")("Foo Bar$")
+    checkExact(completer, "def foo(`$Foo$Bar$`: Int) { `$Foo ", after = "` }")("$Foo$Bar$")
   }
 
   @Test
