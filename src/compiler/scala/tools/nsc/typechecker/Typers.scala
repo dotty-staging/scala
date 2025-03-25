@@ -79,10 +79,10 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
     @inline final def filter(p: T => Boolean): SilentResult[T] = this match {
       case SilentResultValue(value) if !p(value) => SilentTypeError(TypeErrorWrapper(new TypeError(NoPosition, "!p")))
       case _                                     => this
-  }
+    }
     @inline final def orElse[T1 >: T](f: Seq[AbsTypeError] => T1): T1 = this match {
       case SilentResultValue(value) => value
-      case s : SilentTypeError      => f(s.reportableErrors)
+      case s: SilentTypeError       => f(s.reportableErrors)
     }
   }
   class SilentTypeError private(val errors: List[AbsTypeError], val warnings: List[ContextWarning]) extends SilentResult[Nothing] {
