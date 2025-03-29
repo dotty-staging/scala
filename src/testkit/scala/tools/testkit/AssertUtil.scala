@@ -92,8 +92,6 @@ object AssertUtil {
   def assertNotEqualsAny(message: => String, expected: Any, actual: Any): Unit =
     if (BoxesRunTime.equals(expected, actual)) assertNotEquals(message, expected, actual)
 
-  private final val timeout = 60 * 1000L                 // wait a minute
-
   private implicit class `ref helper`[A <: AnyRef](val r: Reference[A]) extends AnyVal {
     def isEmpty: Boolean  = r.get == null // r.refersTo(null) to avoid influencing collection
     def nonEmpty: Boolean = !isEmpty
