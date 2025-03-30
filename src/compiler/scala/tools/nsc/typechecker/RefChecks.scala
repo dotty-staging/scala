@@ -17,7 +17,7 @@ import scala.annotation._
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 import scala.reflect.internal.util.CodeAction
-import scala.tools.nsc.Reporting.WarningCategory
+import scala.tools.nsc.Reporting.WarningCategory, WarningCategory.{LintOverload}
 import scala.tools.nsc.settings.ScalaVersion
 import scala.tools.nsc.settings.NoScalaVersion
 import symtab.Flags._
@@ -158,6 +158,73 @@ abstract class RefChecks extends Transform {
           if (alts.size > 1)
             alts foreach (x => refchecksWarning(x.pos, "parameterized overloaded implicit methods are not visible as view bounds", WarningCategory.LintPolyImplicitOverload))
         })
+      }
+    }
+    private def checkDubiousOverloads(clazz: Symbol): Unit = if (settings.warnDubiousOverload) {
+      // nullary members or methods with leading implicit params
+      def ofInterest(tp: Type): Boolean = tp match {
+        case mt: MethodType => mt.isImplicit
+        case PolyType(_, rt) => ofInterest(rt)
+        case _ => true // includes NullaryMethodType
+      }
+      // takes no value parameters
+      def isNullary(tp: Type): Boolean = tp match {
+        case _: MethodType => false
+        case PolyType(_, rt) => isNullary(rt)
+        case _ => true // includes NullaryMethodType
+      }
+      def warnDubious(sym: Symbol, alts: List[Symbol]): Unit = {
+        val usage = if (sym.isMethod && !sym.isGetter) "Calls to parameterless" else "Usages of"
+        val simpl = "a single implicit parameter list"
+        val suffix = alts.filter(_ != sym).map(_.defString) match {
+          case impl :: Nil => s"$impl, which has $simpl."
+          case impls =>
+            sm"""|overloads which have $simpl:
+                 |  ${impls.mkString("\n  ")}"""
+        }
+        val warnAt =
+          if (sym.owner == clazz) sym.pos
+          else
+            alts.find(_.owner == clazz) match {
+              case Some(conflict) => conflict.pos
+              case _ => clazz.pos
+            }
+        refchecksWarning(warnAt, s"$usage $sym will be easy to mistake for calls to $suffix", LintOverload)
+      }
+      val byName =
+        clazz.info.members
+          .reverseIterator
+          .filter(m => ofInterest(m.info))
+          .toList
+          .groupBy(_.name.dropLocal)
+      def isCompetitive(syms: List[Symbol], sawNlly: Boolean, sawNonNlly: Boolean): Boolean =
+        sawNlly && sawNonNlly || (syms match {
+          case sym :: syms =>
+            if (!sawNlly && isNullary(sym.info)) isCompetitive(syms, sawNlly = true, sawNonNlly)
+            else if (!sawNonNlly && !isNullary(sym.info)) isCompetitive(syms, sawNlly, sawNonNlly = true)
+            else isCompetitive(syms, sawNlly, sawNonNlly)
+          case _ => false
+        })
+      for ((_, syms) <- byName if syms.lengthCompare(1) > 0 && isCompetitive(syms, sawNlly=false, sawNonNlly=false)) {
+        val (nullaries, alts) = syms.partition(sym => isNullary(sym.info))
+        //assert(!alts.isEmpty)
+        nullaries match {
+          case nullary :: Nil => warnDubious(nullary, syms)
+          case nullaries =>
+            //assert(!nullaries.isEmpty)
+            val dealiased =
+              nullaries.find(_.isPrivateLocal) match {
+                case Some(local) =>
+                  nullaries.find(sym => sym.isAccessor && sym.accessed == local) match {
+                    case Some(accessor) => nullaries.filter(_ != local) // drop local if it has an accessor
+                    case _ => nullaries
+                  }
+                case _ => nullaries
+              }
+            // there are multiple exactly for a private local and an inherited member
+            for (nullary <- dealiased)
+              warnDubious(nullary, nullary :: alts)
+        }
       }
     }
 
@@ -1989,6 +2056,7 @@ abstract class RefChecks extends Transform {
             checkOverloadedRestrictions(currentOwner, currentOwner)
             // scala/bug#7870 default getters for constructors live in the companion module
             checkOverloadedRestrictions(currentOwner, currentOwner.companionModule)
+            checkDubiousOverloads(currentOwner)
             val bridges = addVarargBridges(currentOwner) // TODO: do this during uncurry?
             checkAllOverrides(currentOwner)
             checkAnyValSubclass(currentOwner)

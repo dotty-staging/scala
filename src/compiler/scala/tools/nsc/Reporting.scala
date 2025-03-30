@@ -661,6 +661,7 @@ object Reporting {
         LintIntDivToFloat,
         LintUniversalMethods,
         LintCloneable,
+        LintOverload,
         LintNumericMethods
       = lint()
 
