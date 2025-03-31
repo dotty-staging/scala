@@ -815,17 +815,24 @@ trait ContextErrors extends splain.SplainErrors {
       //adapt
       def MissingArgsForMethodTpeError(tree: Tree, meth: Symbol) = {
         val f = meth.name.decoded
-        val paf = s"$f(${ meth.asMethod.paramLists map (_ map (_ => "_") mkString ",") mkString ")(" })"
+        val paf = s"$f(${ meth.asMethod.paramLists.map(_.map(_ => "_").mkString(",")).mkString(")(") })"
+        val feature = if (!currentRun.isScala3) "" else
+          sm"""|
+               |Use -Xsource-features:eta-expand-always to convert even if the expected type is not a function type."""
         val advice =
           if (meth.isConstructor || meth.info.params.lengthIs > definitions.MaxFunctionArity) ""
-          else s"""
-            |Unapplied methods are only converted to functions when a function type is expected.${
-              if (!currentRun.isScala3) "" else """
-            |Use -Xsource-features:eta-expand-always to convert even if the expected type is not a function type."""}
-            |You can make this conversion explicit by writing `$f _` or `$paf` instead of `$f`.""".stripMargin
+          else
+            sm"""|
+                 |Unapplied methods are only converted to functions when a function type is expected.$feature
+                 |You can make this conversion explicit by writing `$f _` or `$paf` instead of `$f`."""
+        val help = tree match {
+          case Select(qualifier, name) => qualifier.tpe.memberType(meth)
+          case treeInfo.Applied(Select(qualifier, _), _, _) => qualifier.tpe.memberType(meth)
+          case _ => meth.info
+        }
         val message =
           if (meth.isMacro) MacroTooFewArgumentListsMessage
-          else s"""missing argument list for ${meth.fullLocationString}$advice"""
+          else s"""missing argument list for ${meth.fullLocationString} of type ${help}${advice}"""
         issueNormalTypeError(tree, message)
         setError(tree)
       }
@@ -1150,18 +1157,20 @@ trait ContextErrors extends splain.SplainErrors {
         val ambiguousBuffered = !context.ambiguousErrors
         if (validTargets || ambiguousBuffered)
           context.issueAmbiguousError(
-            if (sym1.hasDefault && sym2.hasDefault && sym1.enclClass == sym2.enclClass) {
-              val methodName = nme.defaultGetterToMethod(sym1.name)
+            if (sym1.hasDefault && sym2.hasDefault && sym1.enclClass == sym2.enclClass)
               AmbiguousTypeError(sym1.enclClass.pos,
-                s"in ${sym1.enclClass}, multiple overloaded alternatives of $methodName define default arguments")
-
-            } else {
+                s"in ${sym1.enclClass}, multiple overloaded alternatives of ${
+                  nme.defaultGetterToMethod(sym1.name)
+                } define default arguments"
+              )
+            else
               AmbiguousTypeError(pos,
-                 "ambiguous reference to overloaded definition,\n" +
-                s"both ${sym1.fullLocationString} of type ${pre.memberType(sym1)}\n" +
-                s"and  ${sym2.fullLocationString} of type ${pre.memberType(sym2)}\n" +
-                s"match $rest")
-            })
+              sm"""|ambiguous reference to overloaded definition,
+                   |both ${sym1.fullLocationString} of type ${pre.memberType(sym1)}
+                   |and  ${sym2.fullLocationString} of type ${pre.memberType(sym2)}
+                   |match $rest"""
+              )
+          )
       }
 
       def AccessError(tree: Tree, sym: Symbol, ctx: Context, explanation: String): AbsTypeError =
