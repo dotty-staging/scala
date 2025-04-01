@@ -510,6 +510,8 @@ trait TypeDiagnostics extends splain.SplainDiagnostics {
     val params    = mutable.Set.empty[Symbol]
     val patvars   = ListBuffer.empty[Tree /*Bind|ValDef*/]
 
+    val annots    = mutable.Set.empty[AnnotationInfo] // avoid revisiting annotations of symbols and types
+
     def recordReference(sym: Symbol): Unit = targets.addOne(sym)
 
     def qualifiesTerm(sym: Symbol) = (
@@ -601,8 +603,13 @@ trait TypeDiagnostics extends splain.SplainDiagnostics {
         case _ =>
       }
 
-      if (t.tpe ne null) {
-        for (tp <- t.tpe) if (!treeTypes(tp)) {
+      def descend(annot: AnnotationInfo): Unit =
+        if (!annots(annot)) {
+          annots.addOne(annot)
+          traverse(annot.original)
+        }
+      if ((t.tpe ne null) && t.tpe != NoType) {
+        for (tp <- t.tpe if tp != NoType) if (!treeTypes(tp)) {
           // Include references to private/local aliases (which might otherwise refer to an enclosing class)
           val isAlias = {
             val td = tp.typeSymbolDirect
@@ -621,6 +628,8 @@ trait TypeDiagnostics extends splain.SplainDiagnostics {
               log(s"${if (isAlias) "alias " else ""}$tp referenced from $currentOwner")
               treeTypes += tp
           }
+          for (annot <- tp.annotations)
+            descend(annot)
         }
         // e.g. val a = new Foo ; new a.Bar ; don't let a be reported as unused.
         t.tpe.prefix foreach {
@@ -628,6 +637,11 @@ trait TypeDiagnostics extends splain.SplainDiagnostics {
           case _                  => ()
         }
       }
+
+      if (sym != null && sym.exists)
+        for (annot <- sym.annotations)
+          descend(annot)
+
       super.traverse(t)
     }
     def isSuppressed(sym: Symbol): Boolean = sym.hasAnnotation(UnusedClass)
@@ -636,7 +650,7 @@ trait TypeDiagnostics extends splain.SplainDiagnostics {
         && !isSuppressed(m)
         && !m.isTypeParameterOrSkolem // would be nice to improve this
         && (m.isPrivate || m.isLocalToBlock || isEffectivelyPrivate(m))
-        && !(treeTypes.exists(_.exists(_.typeSymbolDirect == m)))
+        && !treeTypes.exists(_.exists(_.typeSymbolDirect == m))
       )
     def isSyntheticWarnable(sym: Symbol) = {
       def privateSyntheticDefault: Boolean =
@@ -654,7 +668,6 @@ trait TypeDiagnostics extends splain.SplainDiagnostics {
         && !targets(m)
         && !(m.name == nme.WILDCARD)              // e.g. val _ = foo
         && (m.isValueParameter || !ignoreNames(m.name.toTermName)) // serialization/repl methods
-        && !isConstantType(m.info.resultType)     // subject to constant inlining
         && !treeTypes.exists(_ contains m)        // e.g. val a = new Foo ; new a.Bar
       )
     def isUnusedParam(m: Symbol): Boolean = (
