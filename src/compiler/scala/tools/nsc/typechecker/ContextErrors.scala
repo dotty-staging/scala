@@ -825,14 +825,31 @@ trait ContextErrors extends splain.SplainErrors {
             sm"""|
                  |Unapplied methods are only converted to functions when a function type is expected.$feature
                  |You can make this conversion explicit by writing `$f _` or `$paf` instead of `$f`."""
-        val help = tree match {
-          case Select(qualifier, name) => qualifier.tpe.memberType(meth)
-          case treeInfo.Applied(Select(qualifier, _), _, _) => qualifier.tpe.memberType(meth)
-          case _ => meth.info
+        val help = {
+          def memberTypesOf(qualTpe: Type, name: Name): List[Type] = {
+            val m = qualTpe.member(name)
+            if (m.isOverloaded)
+              m.alternatives.map(qualTpe.memberType(_))
+            else
+              List(qualTpe.memberType(meth))
+          }
+          val (qualTpe, memberTypes) = tree match {
+            case Select(qualifier, name) => (qualifier.tpe, memberTypesOf(qualifier.tpe, name))
+            case treeInfo.Applied(Select(qualifier, name), _, _) => (qualifier.tpe, memberTypesOf(qualifier.tpe, name))
+            case _ => (NoType, Nil)
+          }
+          memberTypes match {
+            case tp :: Nil => s" of type $tp"
+            case Nil => s" of type ${meth.info}"
+            case ov =>
+              sm"""|
+                   |with overloaded members in ${qualTpe.dealiasWiden}
+                   |  ${ov.map(show(_)).sorted.mkString("\n  ")}"""
+          }
         }
         val message =
           if (meth.isMacro) MacroTooFewArgumentListsMessage
-          else s"""missing argument list for ${meth.fullLocationString} of type ${help}${advice}"""
+          else s"""missing argument list for ${meth.fullLocationString}${help}${advice}"""
         issueNormalTypeError(tree, message)
         setError(tree)
       }

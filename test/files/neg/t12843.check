@@ -9,4 +9,13 @@ Unapplied methods are only converted to functions when a function type is expect
 You can make this conversion explicit by writing `update _` or `update(_,_)` instead of `update`.
   def g = b.update
             ^
-2 errors
+t12843.scala:10: error: missing argument list for method map in class BitSet
+with overloaded members in scala.collection.immutable.BitSet
+  (f: Int => Int): scala.collection.immutable.BitSet
+  [B](f: Int => B)(implicit ev: Ordering[B]): scala.collection.immutable.SortedSet[B]
+  [B](f: Int => B): scala.collection.immutable.Set[B]
+Unapplied methods are only converted to functions when a function type is expected.
+You can make this conversion explicit by writing `map _` or `map(_)` instead of `map`.
+  def f = c.map
+            ^
+3 errors
