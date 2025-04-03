@@ -89,7 +89,7 @@ Test.scala:79: error: not enough arguments for constructor Ann2: (x: Int)(y: Int
 Unspecified value parameter x.
   @Ann2 def v7 = 0 // err
    ^
-Test.scala:80: error: missing argument list for constructor Ann2 in class Ann2
+Test.scala:80: error: missing argument list for constructor Ann2 in class Ann2 of type (x: Int)(y: Int): Ann2
   @Ann2(x = 0) def v8 = 0 // err
    ^
 Test.scala:83: error: no arguments allowed for nullary constructor Ann3: (): Ann3
