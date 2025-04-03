@@ -401,6 +401,7 @@ trait Definitions extends api.StandardDefinitions {
     lazy val SpecializableModule  = requiredModule[Specializable]
 
     lazy val ScalaRunTimeModule = requiredModule[scala.runtime.ScalaRunTime.type]
+    lazy val MurmurHash3Module  = requiredModule[scala.util.hashing.MurmurHash3.type]
     lazy val SymbolModule       = requiredModule[scala.Symbol.type]
          def Symbol_apply       = getMemberMethod(SymbolModule, nme.apply)
 
