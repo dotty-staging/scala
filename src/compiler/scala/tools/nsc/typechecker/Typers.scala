@@ -3779,7 +3779,8 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
               duplErrorTree(WrongNumberOfArgsError(tree, fun))
             } else if (lencmp > 0) {
               tryTupleApply orElse duplErrorTree {
-                val (_, argPos) = removeNames(Typer.this)(args, params)
+                val (argsNoNames, argPos) = removeNames(Typer.this)(args, params)
+                argsNoNames.foreach(typed(_, mode, ErrorType)) // typecheck args
                 TooManyArgsNamesDefaultsError(tree, fun, formals, args, argPos)
               }
             } else if (lencmp == 0) {
@@ -3869,7 +3870,8 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
                       silent(_.doTypedApply(tree, if (blockIsEmpty) fun else fun1, allArgsPlusMissingErrors, mode, pt))
                     }
 
-                    removeNames(Typer.this)(allArgs, params) // report bad names
+                    val (argsNoNames, _) = removeNames(Typer.this)(allArgs, params) // report bad names
+                    argsNoNames.foreach(typed(_, mode, ErrorType)) // typecheck args
                     duplErrorTree(NotEnoughArgsError(tree, fun, missing))
                   }
                 }

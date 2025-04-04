@@ -1,0 +1,10 @@
+error-in-apply-args-3.scala:4: error: type mismatch;
+ found   : String("not a num")
+ required: Double
+  tooManyArgs(math.floor("not a num"))
+                         ^
+error-in-apply-args-3.scala:4: error: not enough arguments for method tooManyArgs: (s: String, i: Int): Unit.
+Unspecified value parameter i.
+  tooManyArgs(math.floor("not a num"))
+             ^
+2 errors
