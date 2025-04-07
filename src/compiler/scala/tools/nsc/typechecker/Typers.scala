@@ -5196,7 +5196,8 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
         def reportError(error: SilentTypeError): Tree = {
           error.reportableErrors.foreach(context.issue)
           error.warnings.foreach { case ContextWarning(p, m, c, s, as) => context.warning(p, m, c, s, as) }
-          args.foreach(typed(_, mode, ErrorType))
+          args.map { case NamedArg(_, rhs) => rhs case arg => arg }
+            .foreach(typed(_, mode, ErrorType))
           setError(tree)
         }
         def advice1(convo: Tree, errors: List[AbsTypeError], err: SilentTypeError): List[AbsTypeError] =

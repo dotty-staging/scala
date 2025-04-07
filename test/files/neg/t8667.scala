@@ -106,4 +106,10 @@ trait FurtherFailures {
   def miscount() = tooManyArgs(math.floor("not a num"))
 
   def nonesuch(): Unit = doesntExist(math.floor("not a num 1"), math.floor("not a num 2"))
+
+  def nonesuchical: Unit = doesntExist(i = math.floor("not a num 1"), j = math.floor("not a num 2"))
+
+  def badApplied: Unit = List(42).munge(x = 27)
+
+  def badApply: Unit = List(42).munge { x = 27 }
 }

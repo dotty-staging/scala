@@ -69,10 +69,6 @@ Test.scala:69: error: Java annotation SuppressWarnings is abstract; cannot be in
 Error occurred in an application involving default arguments.
   @Ann(value = 0, c = Array(new SuppressWarnings(value = Array("")))) def u17 = 0 // err
                             ^
-Test.scala:69: error: not found: value value
-Error occurred in an application involving default arguments.
-  @Ann(value = 0, c = Array(new SuppressWarnings(value = Array("")))) def u17 = 0 // err
-                                                 ^
 Test.scala:71: error: annotation argument needs to be a constant; found: new scala.inline()
   @Ann(value = 0, c = Array(new inline)) def u18 = 0 // err
                             ^
@@ -107,4 +103,4 @@ currently not supported; ignoring arguments List(0)
   @Ann2(x = 0)(y = 0) def v9 = 0 // warn
    ^
 1 warning
-32 errors
+31 errors

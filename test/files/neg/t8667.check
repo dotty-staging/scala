@@ -187,4 +187,26 @@ t8667.scala:108: error: type mismatch;
  required: Double
   def nonesuch(): Unit = doesntExist(math.floor("not a num 1"), math.floor("not a num 2"))
                                                                            ^
-58 errors
+t8667.scala:110: error: not found: value doesntExist
+  def nonesuchical: Unit = doesntExist(i = math.floor("not a num 1"), j = math.floor("not a num 2"))
+                           ^
+t8667.scala:110: error: type mismatch;
+ found   : String("not a num 1")
+ required: Double
+  def nonesuchical: Unit = doesntExist(i = math.floor("not a num 1"), j = math.floor("not a num 2"))
+                                                      ^
+t8667.scala:110: error: type mismatch;
+ found   : String("not a num 2")
+ required: Double
+  def nonesuchical: Unit = doesntExist(i = math.floor("not a num 1"), j = math.floor("not a num 2"))
+                                                                                     ^
+t8667.scala:112: error: value munge is not a member of List[Int]
+  def badApplied: Unit = List(42).munge(x = 27)
+                                  ^
+t8667.scala:114: error: value munge is not a member of List[Int]
+  def badApply: Unit = List(42).munge { x = 27 }
+                                ^
+t8667.scala:114: error: not found: value x
+  def badApply: Unit = List(42).munge { x = 27 }
+                                        ^
+64 errors
