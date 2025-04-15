@@ -977,7 +977,7 @@ trait Types
     def load(sym: Symbol): Unit = {}
 
     private def findDecl(name: Name, excludedFlags: Long): Symbol = {
-      var alts: List[Symbol] = List()
+      var alts: List[Symbol] = Nil
       var sym: Symbol = NoSymbol
       var e: ScopeEntry = decls.lookupEntry(name)
       while (e ne null) {
@@ -991,7 +991,7 @@ trait Types
         e = decls.lookupNextEntry(e)
       }
       if (alts.isEmpty) sym
-      else (baseClasses.head.newOverloaded(this, alts))
+      else baseClasses.head.newOverloaded(this, alts)
     }
 
     /** Find all members meeting the flag requirements.
@@ -2930,8 +2930,10 @@ trait Types
 
   object MethodType extends MethodTypeExtractor
 
-  // TODO: rename so it's more appropriate for the type that is for a method without argument lists
-  // ("nullary" erroneously implies it has an argument list with zero arguments, it actually has zero argument lists)
+  /** A method without parameter lists.
+   *
+   *  Note: a MethodType with paramss that is a ListOfNil is called "nilary", to disambiguate.
+   */
   case class NullaryMethodType(override val resultType: Type) extends Type with NullaryMethodTypeApi {
     override def isTrivial = resultType.isTrivial && (resultType eq resultType.withoutAnnotations)
     override def prefix: Type = resultType.prefix
@@ -2952,7 +2954,6 @@ trait Types
       else NullaryMethodType(result1)
     }
     override def foldOver(folder: TypeFolder): Unit = folder(resultType)
-
   }
 
   object NullaryMethodType extends NullaryMethodTypeExtractor
