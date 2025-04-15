@@ -2761,22 +2761,25 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
      * an alternative TODO: add partial function AST node or equivalent and get rid of this synthesis --> do everything in uncurry (or later)
      * however, note that pattern matching codegen is designed to run *before* uncurry
      */
-    def synthesizePartialFunction(paramName: TermName, paramPos: Position, paramSynthetic: Boolean,
+    def synthesizePartialFunction(paramName: TermName, paramPos: Position, paramType: Type, paramSynthetic: Boolean,
                                   tree: Tree, mode: Mode, pt: Type): Tree = {
       assert(pt.typeSymbol == PartialFunctionClass, s"PartialFunction synthesis for match in $tree requires PartialFunction expected type, but got $pt.")
-      val (argTp, resTp) = partialFunctionArgResTypeFromProto(pt)
+      val (argTp0, resTp) = partialFunctionArgResTypeFromProto(pt)
 
       // if argTp isn't fully defined, we can't translate --> error
       // NOTE: resTp still might not be fully defined
-      if (!isFullyDefined(argTp)) {
+      if (!isFullyDefined(argTp0)) {
         MissingParameterTypeAnonMatchError(tree, pt)
         return setError(tree)
       }
+      val argTp =
+        if (paramType.ne(NoType)) paramType
+        else argTp0
 
       // targs must conform to Any for us to synthesize an applyOrElse (fallback to apply otherwise -- typically for @cps annotated targs)
       val targsValidParams = (argTp <:< AnyTpe) && (resTp <:< AnyTpe)
 
-      val anonClass = context.owner newAnonymousFunctionClass tree.pos addAnnotation SerialVersionUIDAnnotation
+      val anonClass = context.owner.newAnonymousFunctionClass(tree.pos).addAnnotation(SerialVersionUIDAnnotation)
 
       import CODE._
 
@@ -2816,7 +2819,7 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
       }
 
       // `def applyOrElse[A1 <: $argTp, B1 >: $matchResTp](x: A1, default: A1 => B1): B1 =
-      //  ${`$selector match { $cases; case default$ => default(x) }`
+      //  ${`$selector match { $cases; case default$ => default(x) }`}
       def applyOrElseMethodDef = {
         val methodSym = anonClass.newMethod(nme.applyOrElse, tree.pos, FINAL | OVERRIDE)
 
@@ -2836,8 +2839,7 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
 
         // First, type without the default case; only the cases provided
         // by the user are typed. The LUB of these becomes `B`, the lower
-        // bound of `B1`, which in turn is the result type of the default
-        // case
+        // bound of `B1`, which in turn is the result type of the default case
         val match0 = methodBodyTyper.typedMatch(selector(x), cases, mode, resTp)
         val matchResTp = match0.tpe
 
@@ -3178,9 +3180,8 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
             // you won't know you're using the wrong owner until lambda lift crashes (unless you know better than to use the wrong owner)
             val outerTyper = newTyper(context.outer)
             val p = vparams.head
-            if (p.tpt.tpe == null) p.tpt setType outerTyper.typedType(p.tpt).tpe
-
-            outerTyper.synthesizePartialFunction(p.name, p.pos, paramSynthetic = false, funBody, mode, pt)
+            if (p.tpt.tpe == null) p.tpt.setType(outerTyper.typedType(p.tpt).tpe)
+            outerTyper.synthesizePartialFunction(p.name, p.pos, p.tpt.tpe, paramSynthetic = false, funBody, mode, pt)
           } else doTypedFunction(fun, resProto)
         }
       }
@@ -4916,7 +4917,7 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
         val cases = tree.cases
         if (selector == EmptyTree) {
           if (pt.typeSymbol == PartialFunctionClass)
-            synthesizePartialFunction(newTermName(fresh.newName("x")), tree.pos, paramSynthetic = true, tree, mode, pt)
+            synthesizePartialFunction(newTermName(fresh.newName("x")), tree.pos, paramType = NoType, paramSynthetic = true, tree, mode, pt)
           else {
             val arity = functionArityFromType(pt) match { case -1 => 1 case arity => arity } // scala/bug#8429: consider sam and function type equally in determining function arity
 
