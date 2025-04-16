@@ -845,7 +845,8 @@ lazy val testkit = configureAsSubproject(project)
 // This is enforced by error (not just by warning) since JDK 16. In our tests we use reflective access
 // from the unnamed package (the classpath) to JDK modules in testing utilities like `assertNotReachable`.
 // `add-exports=jdk.jdeps/com.sun.tools.javap` is tests that use `:javap` in the REPL, see scala/bug#12378
-val addOpensForTesting = "-XX:+IgnoreUnrecognizedVMOptions" +: "--add-exports=jdk.jdeps/com.sun.tools.javap=ALL-UNNAMED" +:
+// Also --enable-native-access is needed for jvm/natives.scala
+val addOpensForTesting = "-XX:+IgnoreUnrecognizedVMOptions" +: "--add-exports=jdk.jdeps/com.sun.tools.javap=ALL-UNNAMED" +: "--enable-native-access=ALL-UNNAMED" +:
   Seq("java.util.concurrent.atomic", "java.lang", "java.lang.reflect", "java.net").map(p => s"--add-opens=java.base/$p=ALL-UNNAMED")
 
 lazy val junit = project.in(file("test") / "junit")
@@ -1091,7 +1092,6 @@ lazy val test = project
     IntegrationTest / fork := true,
     Compile / scalacOptions += "-Yvalidate-pos:parser,typer",
     IntegrationTest / javaOptions ++= List("-Xmx2G", "-Dpartest.exec.in.process=true", "-Dfile.encoding=UTF-8", "-Duser.language=en", "-Duser.country=US") ++ addOpensForTesting,
-    IntegrationTest / javaOptions ++= { if (scala.util.Properties.isJavaAtLeast("18")) List("-Djava.security.manager=allow") else Nil },
     IntegrationTest / testOptions += Tests.Argument("-Dfile.encoding=UTF-8", "-Duser.language=en", "-Duser.country=US"),
     testFrameworks += new TestFramework("scala.tools.partest.sbt.Framework"),
     IntegrationTest / testOptions += Tests.Argument(s"-Dpartest.java_opts=-Xmx1024M -Xms64M ${addOpensForTesting.mkString(" ")}"),
