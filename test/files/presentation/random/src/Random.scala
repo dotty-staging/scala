@@ -63,7 +63,8 @@ object randomserver {
     }
     catch {
       case e: IOException =>
-        System.err.println("Could not listen on port: 9999.");
+        System.err.println("Could not listen on port: 9999.")
+        throw e
     }
   }
 
