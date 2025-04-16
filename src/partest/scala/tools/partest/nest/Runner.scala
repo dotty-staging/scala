@@ -18,7 +18,6 @@ import java.lang.reflect.InvocationTargetException
 import java.nio.charset.Charset
 import java.nio.file.{Files, Path, StandardOpenOption}, StandardOpenOption.{APPEND, CREATE}
 
-import scala.annotation.nowarn
 import scala.collection.mutable, mutable.ListBuffer
 import scala.concurrent.duration.Duration
 import scala.reflect.internal.FatalError
@@ -263,7 +262,7 @@ class Runner(val testInfo: TestInfo, val suiteRunner: AbstractRunner) {
 
       pushTranscript(s"<in process execution of $testIdent> > ${logFile.getName}")
       run()
-      genPass
+      genPass()
     }
   }
 
