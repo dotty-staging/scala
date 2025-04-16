@@ -197,6 +197,8 @@ lazy val commonSettings = instanceSettings ++ clearSourceAndResourceDirectories 
   run / fork := true,
   run / connectInput := true,
   Compile / scalacOptions ++= Seq("-feature", "-Xlint",
+    //"-Wunused:patvars",
+    //"-Wunused:params",
     //"-Vprint",
     //"-Xmaxerrs", "5", "-Xmaxwarns", "5", // uncomment for ease of development while breaking things
     // work around https://github.com/scala/bug/issues/11534
@@ -451,6 +453,7 @@ lazy val library = configureAsSubproject(project)
     name := "scala-library",
     description := "Scala Standard Library",
     Compile / scalacOptions ++= Seq("-sourcepath", (Compile / scalaSource).value.toString),
+    Compile / scalacOptions ++= Seq("-Wconf:msg=method box|method anyValClass:s"), // unused params in patched src
     Compile / doc / scalacOptions ++= {
       val libraryAuxDir = (ThisBuild / baseDirectory).value / "src/library-aux"
       Seq(

@@ -687,10 +687,10 @@ trait EntityPage extends HtmlPage {
         val exceptions: Elems =
           orEmpty(comment.throws) {
             dt("Exceptions thrown") ::
-            Dd(elems= {
+            Dd(elems = {
               val exceptionsXml: List[Elems] =
-                for((name, body) <- comment.throws.toList.sortBy(_._1) ) yield
-                  Span(`class`= "cmt", elems= bodyToHtml(body)) :: NoElems
+                for ((name@_, body) <- comment.throws.toList.sortBy(_._1))
+                yield Span(`class` = "cmt", elems = bodyToHtml(body)) :: NoElems
               exceptionsXml.reduceLeft(_ ++ Txt("") ++ _)
             })
           }
@@ -698,8 +698,10 @@ trait EntityPage extends HtmlPage {
         val todo: Elems =
           orEmpty(comment.todo) {
             dt("To do") ::
-            Dd(elems= {
-              val todoXml: List[Elems] = for(todo <- comment.todo ) yield Span(`class`= "cmt", elems= bodyToHtml(todo)) :: NoElems
+            Dd(elems = {
+              val todoXml: List[Elems] =
+                for (todo <- comment.todo)
+                yield Span(`class` = "cmt", elems = bodyToHtml(todo)) :: NoElems
               todoXml.reduceLeft(_ ++ _)
             })
           }
