@@ -579,9 +579,15 @@ trait TypeDiagnostics extends splain.SplainDiagnostics {
           }
         case Match(selector, cases) =>
           // don't warn when a patvar redefines the selector ident: x match { case x: X => }
+          // or extracts a single patvar named identically to the selector
           def allowVariableBindings(n: Name, pat: Tree): Unit =
-            pat.foreach {
-              case bind @ Bind(`n`, _) => bind.updateAttachment(NoWarnAttachment)
+            pat match {
+              case Bind(`n`, _) => pat.updateAttachment(NoWarnAttachment)
+              case Apply(_, _) | UnApply(_, _) => // really interested in args
+                pat.filter(_.isInstanceOf[Bind]) match { // never nme.WILDCARD
+                  case (bind @ Bind(`n`, _)) :: Nil => bind.updateAttachment(NoWarnAttachment) // one only
+                  case _ =>
+                }
               case _ =>
             }
           def allow(n: Name): Unit = cases.foreach(k => allowVariableBindings(n, k.pat))
@@ -594,7 +600,7 @@ trait TypeDiagnostics extends splain.SplainDiagnostics {
             }
           loop(selector)
         case CaseDef(pat, _, _) if settings.warnUnusedPatVars && !t.isErrorTyped =>
-          def absolveVariableBindings(app: Apply, args: List[Tree]): Unit =
+          def allowVariableBindings(app: Apply, args: List[Tree]): Unit =
             treeInfo.dissectApplied(app).core.tpe match {
               case MethodType(ps, _) =>
                 foreach2(ps, args) { (p, x) =>
@@ -606,10 +612,7 @@ trait TypeDiagnostics extends splain.SplainDiagnostics {
               case _ =>
             }
           pat.foreach {
-            case app @ Apply(_, args) => absolveVariableBindings(app, args)
-            case _ =>
-          }
-          pat.foreach {
+            case app @ Apply(_, args) => allowVariableBindings(app, args)
             case b @ Bind(n, _) if n != nme.DEFAULT_CASE => addPatVar(b)
             case _ =>
           }
