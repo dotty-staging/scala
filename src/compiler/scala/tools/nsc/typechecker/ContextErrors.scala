@@ -519,7 +519,7 @@ trait ContextErrors extends splain.SplainErrors {
         }
         sel match {
           case tree: Import => // selector name is unique; use it to improve position
-            tree.selectors.find(_.introduces(name)) match {
+            tree.selectors.find(_.hasName(name)) match {
               case Some(badsel) => issueTypeError(PosAndMsgTypeError(tree.posOf(badsel), errMsg))
               case _ => issueNormalTypeError(sel, errMsg)
             }
