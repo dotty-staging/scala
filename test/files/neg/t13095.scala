@@ -26,6 +26,31 @@ class C {
       case x: String => // nowarn because x is not a new reference but an alias
       case _ =>
     }
+  def s(x: Option[String]) =
+    x match {
+      case x: Some[String] => // nowarn because x is not a new reference but an alias
+      case _ =>
+    }
+  def t(x: Option[String]) =
+    x match {
+      case Some(x) => // nowarn because x is not a new reference but an alias of sorts
+      case _ =>
+    }
+  val email = "(.*)@(.*)".r
+  def spam(s: String) =
+    s match {
+      case email(s, addr) => // warn // warn each, multiple extraction
+      case _ =>
+    }
+  def border(s: String) =
+    s match {
+      case email(s, _) => // nowarn only one patvar
+      case _ =>
+    }
+  def `scala-dev#902`(v: (Int, (Boolean, String))): Unit =
+    v match {
+      case (i, v @ (_, _)) => i // warn multiple patvars
+    }
 }
 
 final class ArrayOps[A](private val xs: Array[A]) extends AnyVal {
