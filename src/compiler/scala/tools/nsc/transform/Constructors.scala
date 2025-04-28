@@ -607,7 +607,7 @@ abstract class Constructors extends Statics with Transform with TypingTransforme
 
       private def triage() = {
         // Constant typed vals are not memoized.
-        def memoizeValue(sym: Symbol) = !sym.info.resultType.isInstanceOf[FoldableConstantType]
+        def memoizeValue(sym: Symbol) = enteringErasure(!sym.info.resultType.isInstanceOf[FoldableConstantType])
 
         // The early initialized field definitions of the class (these are the class members)
         val presupers = treeInfo.preSuperFields(stats)

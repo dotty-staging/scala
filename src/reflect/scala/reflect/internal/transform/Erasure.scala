@@ -134,8 +134,10 @@ trait Erasure {
     def apply(tp: Type): Type = tp match {
       case FoldableConstantType(ct) =>
         // erase classOf[List[_]] to classOf[List]. special case for classOf[Unit], avoid erasing to classOf[BoxedUnit].
-        if (ct.tag == ClazzTag && ct.typeValue.typeSymbol != UnitClass) ConstantType(Constant(apply(ct.typeValue)))
-        else tp
+        if (ct.tag == ClazzTag)
+          if (ct.typeValue.typeSymbol == UnitClass) tp
+          else ConstantType(Constant(apply(ct.typeValue)))
+        else ct.tpe
       case st: ThisType if st.sym.isPackageClass =>
         tp
       case st: SubType =>
