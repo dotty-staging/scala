@@ -2197,13 +2197,10 @@ self =>
        */
       def pattern1(): Tree = pattern2() match {
         case p @ Ident(name) if in.token == COLON =>
-          if (nme.isVariableName(name)) {
-            p.removeAttachment[BackquotedIdentifierAttachment.type]
-            atPos(p.pos.start, in.skipToken())(Typed(p, compoundType()))
-          } else {
-            syntaxError(in.offset, "Pattern variables must start with a lower-case letter. (SLS 8.1.1.)")
-            p
-          }
+          if (!nme.isVariableName(name))
+            syntaxError(p.pos.point, "Pattern variables must start with a lower-case letter. (SLS 8.1.1.)")
+          p.removeAttachment[BackquotedIdentifierAttachment.type]
+          atPos(p.pos.start, in.skipToken())(Typed(p, compoundType()))
         case p => p
       }
 
