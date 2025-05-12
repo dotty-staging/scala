@@ -95,9 +95,9 @@ class IterableTest {
   }
 
   @Test def copyToArray(): Unit = {
-    def check(a: Array[Int], copyToArray: Array[Int] => Int, elemsWritten: Int, start: Int, end: Int) = {
+    def check(a: Array[Int], copyToArray: Array[Int] => Int)(n: Int)(start: Int, end: Int) = {
 
-      assertEquals(elemsWritten, copyToArray(a))
+      assertEquals(n, copyToArray(a))
 
       var i = 0
       while (i < start) {
@@ -118,34 +118,35 @@ class IterableTest {
       val it = Iterable.from(basis)
       val far = 100000
 
-      check(new Array(100), it.copyToArray(_), 100, 0, far)
-      check(new Array(10), it.copyToArray(_), 10, 0, far)
-      check(new Array(100), it.copyToArray(_), 100, 0, 100)
+      check(new Array(100), it.copyToArray(_))(100)(0, far)
+      check(new Array(10), it.copyToArray(_))(10)(0, far)
+      check(new Array(100), it.copyToArray(_))(100)(0, 100)
 
-      check(new Array(100), it.copyToArray(_, 5), 95, 5, 105)
-      check(new Array(10), it.copyToArray(_, 5), 5, 5, 10)
-      check(new Array(1000), it.copyToArray(_, 5), 100, 5, 105)
+      check(new Array(100), it.copyToArray(_, 5))(95)(5, 105)
+      check(new Array(10), it.copyToArray(_, 5))(5)(5, 10)
+      check(new Array(1000), it.copyToArray(_, 5))(100)(5, 105)
 
-      check(new Array(100), it.copyToArray(_, 5, 50), 50, 5, 55)
-      check(new Array(10), it.copyToArray(_, 5, 50), 5, 5, 10)
-      check(new Array(1000), it.copyToArray(_, 5, 50), 50, 5, 55)
+      check(new Array(100), it.copyToArray(_, 5, 50))(50)(5, 55)
+      check(new Array(10), it.copyToArray(_, 5, 50))(5)(5, 10)
+      check(new Array(1000), it.copyToArray(_, 5, 50))(50)(5, 55)
 
-      // bad start index throws if n >= 0
-      assertThrows[ArrayIndexOutOfBoundsException](it.copyToArray(new Array(10), -1))
-      assertThrows[ArrayIndexOutOfBoundsException](it.copyToArray(new Array(10), -1, 10))
-      assertEquals(0, it.copyToArray(new Array(10), 1, -1))
+      // bad start index throws if n > 0
+      assertThrows[ArrayIndexOutOfBoundsException](it.copyToArray(new Array(10), start = -1))
+      assertThrows[ArrayIndexOutOfBoundsException](it.copyToArray(new Array(10), start = -1, n = 10))
+      check(new Array(10), it.copyToArray(_, start = -1, n = 0))(0)(0, 0)
+      check(new Array(10), it.copyToArray(_, start = 1, n = -1))(0)(0, 0)
 
-      check(new Array(10), it.copyToArray(_, 10), 0, 0, 0)
-      check(new Array(10), it.copyToArray(_, 10, 10), 0, 0, 0)
-      check(new Array(10), it.copyToArray(_, 0, -1), 0, 0, 0)
+      check(new Array(10), it.copyToArray(_, 10))(0)(0, 0)
+      check(new Array(10), it.copyToArray(_, 10, 10))(0)(0, 0)
+      check(new Array(10), it.copyToArray(_, 0, -1))(0)(0, 0)
 
       // bad start index is ignored if n < 0
-      check(new Array(10), it.copyToArray(_, -1, -1), 0, 0, 0)
-      check(new Array(10), it.copyToArray(_, Int.MinValue, -1), 0, 0, 0)
+      check(new Array(10), it.copyToArray(_, -1, -1))(0)(0, 0)
+      check(new Array(10), it.copyToArray(_, Int.MinValue, -1))(0)(0, 0)
 
       // also if destination is empty
-      check(new Array(0), it.copyToArray(_, 10, 10), 0, 0, 0)
-      check(new Array(0), it.copyToArray(_, Int.MinValue, -1), 0, 0, 0)
+      check(new Array(0), it.copyToArray(_, 10, 10))(0)(0, 0)
+      check(new Array(0), it.copyToArray(_, Int.MinValue, -1))(0)(0, 0)
     }
     checkUp(Range(0, 100))
     checkUp(List.range(0, 100))
