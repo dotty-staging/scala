@@ -788,6 +788,7 @@ abstract class TreeInfo {
         case Apply(f, _)           => hasExplicitUnit(f)
         case TypeApply(f, _)       => hasExplicitUnit(f)
         case AppliedTypeTree(f, _) => hasExplicitUnit(f)
+        case Block(_, expr)        => hasExplicitUnit(expr)
         case _                     => false
       }
     }
