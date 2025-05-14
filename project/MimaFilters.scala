@@ -32,6 +32,13 @@ object MimaFilters extends AutoPlugin {
     ProblemFilters.exclude[DirectMissingMethodProblem]("scala.Predef#ArrayCharSequence.isEmpty"),
     ProblemFilters.exclude[DirectMissingMethodProblem]("scala.runtime.ArrayCharSequence.isEmpty"),
 
+    // new jdk 25 method in CharSequence => mixin forwarders
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.Predef#ArrayCharSequence.getChars"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.Predef#SeqCharSequence.getChars"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.collection.mutable.StringBuilder.getChars"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.runtime.ArrayCharSequence.getChars"),
+    ProblemFilters.exclude[DirectMissingMethodProblem]("scala.runtime.SeqCharSequence.getChars"),
+
   )
 
   override val buildSettings = Seq(
