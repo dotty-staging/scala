@@ -528,7 +528,7 @@ abstract class ClassfileParser(reader: ReusableInstance[ReusableDataReader]) {
       val parentIndex = u2()
       val parentName = if (parentIndex == 0) null else pool.getClassName(parentIndex)
       val ifaceCount = u2()
-      val ifaces = for (_ <- List.range(0, ifaceCount)) yield pool.getSuperClassName(index = u2())
+      val ifaces = List.fill(ifaceCount.toInt)(pool.getSuperClassName(index = u2()))
       val completer = new ClassTypeCompleter(clazz.name, jflags, parentName, ifaces)
 
       enterOwnInnerClasses()
