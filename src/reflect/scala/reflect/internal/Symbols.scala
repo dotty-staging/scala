@@ -1316,13 +1316,13 @@ trait Symbols extends api.Symbols { self: SymbolTable =>
     final def fullName(separator: Char): String = fullName(separator, "")
 
     private def fullName(separator: Char, suffix: CharSequence): String = {
-      var b: java.lang.StringBuffer = null
+      var b: StringBuilder = null
       def loop(size: Int, sym: Symbol): Unit = {
         val symName = sym.name
         val nSize = symName.length - (if (symName.endsWith(nme.LOCAL_SUFFIX_STRING)) 1 else 0)
         if (sym.isRoot || sym.isRootPackage || sym == NoSymbol || sym.owner.isEffectiveRoot) {
           val capacity = size + nSize
-          b = new java.lang.StringBuffer(capacity)
+          b = new StringBuilder(capacity)
           symName.appendTo(b, 0, nSize)
         } else {
           loop(size + nSize + 1, sym.effectiveOwner.enclClass)
@@ -1330,7 +1330,7 @@ trait Symbols extends api.Symbols { self: SymbolTable =>
           symName.appendTo(b, 0, nSize)
         }
       }
-      loop(suffix.length(), this)
+      loop(suffix.length, this)
       b.append(suffix)
       b.toString
     }
