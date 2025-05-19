@@ -13,7 +13,9 @@
 package scala.tools.nsc
 package typechecker
 
+import scala.collection.mutable
 import scala.collection.mutable.ArrayDeque
+import scala.reflect.internal.util.JavaClearable
 
 /** Defines the sub-components for the namer, packageobjects, and typer phases.
  */
@@ -55,7 +57,13 @@ trait Analyzer extends AnyRef
   object packageObjects extends {
     val global: Analyzer.this.global.type = Analyzer.this.global
   } with SubComponent {
-    val deferredOpen = perRunCaches.newSet[Symbol]()
+    val deferredOpen: mutable.Set[Symbol] = {
+      import scala.jdk.CollectionConverters._
+      // This will throw a ConcurrentModificationException if we mutate during iteration
+      val javaSet = new java.util.LinkedHashSet[Symbol]()
+      perRunCaches.recordCache(JavaClearable.forCollection(javaSet))
+      javaSet.asScala
+    }
     val phaseName = "packageobjects"
     val runsAfter = List[String]()
     val runsRightAfter= Some("namer")
@@ -80,8 +88,18 @@ trait Analyzer extends AnyRef
 
       def apply(unit: CompilationUnit): Unit = {
         openPackageObjectsTraverser(unit.body)
-        deferredOpen.foreach(openPackageModule(_))
-        deferredOpen.clear()
+      }
+
+      override def run(): Unit = {
+        super.run()
+
+        for (sym <- deferredOpen.toVector) {
+          if (deferredOpen.remove(sym)) {
+            // this can remove entries from `deferredOpen`, hence the copy to a vector
+            // and the check of `remove` return value
+            openPackageModule(sym)
+          }
+        }
       }
     }
   }
