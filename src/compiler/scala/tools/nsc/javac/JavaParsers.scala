@@ -770,14 +770,9 @@ trait JavaParsers extends ast.parser.ParsersCommon with JavaScanners {
       }
     }
 
-    def memberDecl(mods: Modifiers, parentToken: Int): List[Tree] = {
-      in.token match {
-        case CLASS | ENUM | RECORD | INTERFACE | AT =>
-          typeDecl(mods)
-        case _ =>
-          termDecl(mods, parentToken)
-      }
-    }
+    def memberDecl(mods: Modifiers, parentToken: Int): List[Tree] =
+      if (isTypeDeclStart()) typeDecl(mods)
+      else termDecl(mods, parentToken)
 
     def makeCompanionObject(cdef: ClassDef, statics: List[Tree]): Tree =
       atPos(cdef.pos) {
@@ -1061,6 +1056,13 @@ trait JavaParsers extends ast.parser.ParsersCommon with JavaScanners {
       (res, hasClassBody)
     }
 
+    def isTypeDeclStart(): Boolean = {
+      adaptRecordIdentifier()
+      in.token match {
+        case ENUM | INTERFACE | AT | CLASS | RECORD => true
+        case _ => false
+      }
+    }
     def typeDecl(mods: Modifiers): List[Tree] = {
       adaptRecordIdentifier()
       in.token match {
@@ -1092,6 +1094,14 @@ trait JavaParsers extends ast.parser.ParsersCommon with JavaScanners {
     /** CompilationUnit ::= [[Annotation] package QualId semi] {Import} {TypeDecl} //TopStatSeq
      */
     def compilationUnit(): Tree = {
+      var compact = false
+      def typeDeclOrCompact(mods: Modifiers): List[Tree] =
+        if (isTypeDeclStart()) typeDecl(mods)
+        else {
+          val ts = termDecl(mods, CLASS)
+          if (ts.nonEmpty) compact = true
+          Nil
+        }
       val buf = ListBuffer.empty[Tree]
       var pos = in.currentPos
       val leadingAnnots = if (in.token == AT) annotations() else Nil
@@ -1107,7 +1117,7 @@ trait JavaParsers extends ast.parser.ParsersCommon with JavaScanners {
         }
         else {
           if (!leadingAnnots.isEmpty)
-            buf ++= typeDecl(modifiers(inInterface = false, annots0 = leadingAnnots))
+            buf ++= typeDeclOrCompact(modifiers(inInterface = false, annots0 = leadingAnnots))
           Ident(nme.EMPTY_PACKAGE_NAME)
         }
       thisPackageName = gen.convertToTypeName(pkg) match {
@@ -1120,10 +1130,11 @@ trait JavaParsers extends ast.parser.ParsersCommon with JavaScanners {
       while (in.token != EOF && in.token != RBRACE) {
         while (in.token == SEMI) in.nextToken()
         if (in.token != EOF)
-          buf ++= typeDecl(modifiers(inInterface = false))
+          buf ++= typeDeclOrCompact(modifiers(inInterface = false))
       }
       accept(EOF)
-      atPos(pos) {
+      if (compact) EmptyTree
+      else atPos(pos) {
         makePackaging(pkg, buf.toList)
       }
     }
