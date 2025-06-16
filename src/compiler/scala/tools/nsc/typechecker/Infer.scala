@@ -15,9 +15,9 @@ package typechecker
 
 import scala.collection.{immutable, mutable}, mutable.ListBuffer
 import scala.reflect.internal.Depth
+import scala.tools.nsc.Reporting.WarningCategory, WarningCategory.LintInferAny
 import scala.util.control.ControlThrowable
 import symtab.Flags._
-import scala.tools.nsc.Reporting.WarningCategory
 
 /** This trait contains methods related to type parameter inference.
  *
@@ -55,7 +55,7 @@ trait Infer extends Checkable {
 
       val n = numArgs - numFormals + 1
       // Optimized version of: formals1.init ::: List.fill(n)(lastType)
-      val result = mutable.ListBuffer[Type]()
+      val result = ListBuffer.empty[Type]
       var fs = formals1
       while ((fs ne Nil) && (fs.tail ne Nil)) {
         result.addOne(fs.head)
@@ -495,10 +495,8 @@ trait Infer extends Checkable {
      *    type parameters that are inferred as `scala.Nothing` and that are not covariant in `restpe` are taken to be undetermined
      */
     def adjustTypeArgs(tparams: List[Symbol], tvars: List[TypeVar], targs: List[Type], restpe: Type = WildcardType): AdjustedTypeArgs  = {
-      val okParams = ListBuffer[Symbol]()
-      val okArgs = ListBuffer[Type]()
-      val undetParams = ListBuffer[Symbol]()
-      val allArgs = ListBuffer[Type]()
+      val okParams, undetParams = ListBuffer.empty[Symbol]
+      val okArgs, allArgs = ListBuffer.empty[Type]
 
       foreach3(tparams, tvars, targs) { (tparam, tvar, targ) =>
         val retract = (
@@ -586,11 +584,15 @@ trait Infer extends Checkable {
       // For example, don't require this arg, where the lub of `AnyRef` and `V` yields the `Any`.
       // this.forall(kv => map.getOrElse[Any](kv._1, Map.DefaultSentinelFn()) == kv._2)
       if (settings.warnInferAny && !fn.isEmpty)
-        foreach2(targs, tvars) { (targ, tvar) =>
+        foreach3(tparams, targs, tvars) { (tparam, targ, tvar) =>
           if (topTypes.contains(targ.typeSymbol) &&
               !tvar.constr.loBounds.exists(t => topTypes.contains(t.typeSymbol)) &&
               !tvar.constr.hiBounds.exists(t => topTypes.contains(t.typeSymbol)))
-            context.warning(fn.pos, s"a type was inferred to be `${targ.typeSymbol.name}`; this may indicate a programming error.", WarningCategory.LintInferAny)
+            context.warning(fn.pos, s"a type was inferred to be `${targ.typeSymbol.name
+              }`; this may indicate a programming error.", LintInferAny)
+          if (!tparam.isMonomorphicType && !targ.isHigherKinded)
+            context.warning(fn.pos, s"a type was inferred to be kind-polymorphic `${targ.typeSymbol.name
+              }` to conform to `${tparam.defString}`", LintInferAny)
         }
       adjustTypeArgs(tparams, tvars, targs, restpe)
     }
