@@ -4094,7 +4094,8 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
       if (typedFun.isErroneous) return finish(ErroneousAnnotation)
 
       val Select(New(annTpt), _) = typedFun: @unchecked
-      val annType = annTpt.tpe // for a polymorphic annotation class, this type will have unbound type params (see context.undetparams)
+      val annType = annTpt.tpe.dealias
+        // for a polymorphic annotation class, annType will have unbound type params (see context.undetparams)
       val annTypeSym = annType.typeSymbol
       val isJava = annTypeSym.isJavaDefined
 
@@ -4973,13 +4974,7 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
       def typedNew(tree: New) = {
         val tpt = tree.tpt
         val tpt1 = {
-          // This way typedNew always returns a dealiased type. This used to happen by accident
-          // for instantiations without type arguments due to ad hoc code in typedTypeConstructor,
-          // and annotations depended on it (to the extent that they worked, which they did
-          // not when given a parameterized type alias which dealiased to an annotation.)
-          // typedTypeConstructor dealiases nothing now, but it makes sense for a "new" to always be
-          // given a dealiased type.
-          val tpt0 = typedTypeConstructor(tpt) modifyType (_.dealias)
+          val tpt0 = typedTypeConstructor(tpt)
 
           if (checkStablePrefixClassType(tpt0)) {
             tpt0.tpe.normalize match { // eta-expand
@@ -4987,7 +4982,7 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
                 context.undetparams = undet // can reuse these type params, they're fresh
                 notifyUndetparamsAdded(undet)
                 TypeTree().setOriginal(tpt0).setType(appliedToUndet)
-              case _                               => tpt0
+              case _ => tpt0
             }
           }
           else tpt0
@@ -5021,9 +5016,9 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
                      // sym.thisSym.tpe == tp.typeOfThis (except for objects)
                   || narrowRhs(tp) <:< tp.typeOfThis
                   || phase.erasedTypes
-                  )) {
+                  ))
           DoesNotConformToSelfTypeError(tree, sym, tp.typeOfThis)
-        } else
+        else
           treeCopy.New(tree, tpt1).setType(tp)
       }
 
