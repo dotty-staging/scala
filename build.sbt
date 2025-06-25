@@ -451,7 +451,7 @@ lazy val compilerOptionsExporter = Project("compilerOptionsExporter", file(".") 
   .settings(disablePublishing)
   .settings(
     libraryDependencies ++= {
-      val jacksonVersion = "2.19.0"
+      val jacksonVersion = "2.19.1"
       Seq(
         "com.fasterxml.jackson.core" % "jackson-core" % jacksonVersion,
         "com.fasterxml.jackson.core" % "jackson-annotations" % jacksonVersion,
