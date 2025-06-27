@@ -209,4 +209,25 @@ class ArraySeqTest {
       assertEquals(a ++: b, expect)
     }
   }
+
+  @Test
+  def t13108(): Unit = {
+    def checkBoth[A: ClassTag](check: (ArraySeq[A], ArraySeq[A]) => Unit, a: ArraySeq[A], b: ArraySeq[A]): Unit = {
+      check(a, b)
+      check(a.map(identity), b)
+      check(a, b.map(identity))
+      check(a.map(identity), b.map(identity))
+    }
+    def checkEquals[A: ClassTag](a: ArraySeq[A], b: ArraySeq[A]): Unit = checkBoth(assertEquals, a, b)
+    def checkNotEquals[A: ClassTag](a: ArraySeq[A], b: ArraySeq[A]): Unit = checkBoth(assertNotEquals, a, b)
+
+    checkEquals(ArraySeq(1, 2, 3), ArraySeq(1, 2, 3))
+    checkNotEquals(ArraySeq(1, 2, 3), ArraySeq(1, 2))
+    checkNotEquals(ArraySeq(1, 2, 3), ArraySeq(1, 2, 4))
+    checkNotEquals(ArraySeq(1, 2, 3), ArraySeq(1, 2, 3, 4))
+    checkEquals(ArraySeq(-0.0f), ArraySeq(0.0f))
+    checkEquals(ArraySeq(-0.0), ArraySeq(0.0))
+    checkNotEquals(ArraySeq(Double.NaN), ArraySeq(Double.NaN))
+    checkNotEquals(ArraySeq(Float.NaN), ArraySeq(Float.NaN))
+  }
 }
