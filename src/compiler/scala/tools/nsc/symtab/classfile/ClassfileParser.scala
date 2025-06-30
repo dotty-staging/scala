@@ -627,6 +627,15 @@ abstract class ClassfileParser(reader: ReusableInstance[ReusableDataReader]) {
     }
   }
 
+  private class SigToTypeFail(msg: String) extends Throwable(msg)
+
+  // scala/bug#9152: sigToType can fail when directly accessing the symbol of a Java nested class
+  // `None` if `sig == null` or when `sigToType` fails
+  private def sigToTypeOpt(sym: Symbol, sig: String): Option[Type] = {
+    try Option(sig).map(sigToType(sym, _))
+    catch { case _: SigToTypeFail => None}
+  }
+
   private def sigToType(sym: Symbol, sig: String): Type = {
     val sigChars = sig.toCharArray
     var index = 0
@@ -749,7 +758,7 @@ abstract class ClassfileParser(reader: ReusableInstance[ReusableDataReader]) {
           val n = newTypeName(subName(';'.==))
           index += 1
           if (skiptvs) AnyTpe
-          else tparams(n).typeConstructor
+          else tparams.getOrElse(n, throw new SigToTypeFail(s"unknown type variable: $n")).typeConstructor
       }
     } // sig2type(tparams, skiptvs)
 
@@ -1295,7 +1304,7 @@ abstract class ClassfileParser(reader: ReusableInstance[ReusableDataReader]) {
   private final class ClassTypeCompleter(@unused name: Name, @unused jflags: JavaAccFlags, parent: NameOrString, ifaces: List[NameOrString]) extends JavaTypeCompleter {
     var permittedSubclasses: List[symbolTable.Symbol] = Nil
     override def complete(sym: symbolTable.Symbol): Unit = {
-      val info = if (sig != null) sigToType(sym, sig) else {
+      val info = sigToTypeOpt(sym, sig).getOrElse {
         val superTpe = if (parent == null) definitions.AnyClass.tpe_* else getClassSymbol(parent.value).tpe_*
         val superTpe1 = if (superTpe == ObjectTpeJava) ObjectTpe else superTpe
         val ifacesTypes = ifaces.filterNot(_ eq null).map(x => getClassSymbol(x.value).tpe_*)
@@ -1335,25 +1344,25 @@ abstract class ClassfileParser(reader: ReusableInstance[ReusableDataReader]) {
         case _ => false
       })
 
-      val info = if (sig != null) {
-        sigToType(sym, sig)
-      } else if (name == nme.CONSTRUCTOR) {
-        descriptorInfo match {
-          case MethodType(params, _) =>
-            val paramsNoOuter = if (hasOuterParam) params.tail else params
-            val newParams = paramsNoOuter match {
-              case init :+ _ if jflags.isSynthetic =>
-                // scala/bug#7455 strip trailing dummy argument ("access constructor tag") from synthetic constructors which
-                // are added when an inner class needs to access a private constructor.
-                init
-              case _ =>
-                paramsNoOuter
-            }
-            MethodType(newParams, clazz.tpe)
-          case info => info
+      val info = sigToTypeOpt(sym, sig).getOrElse {
+        if (name == nme.CONSTRUCTOR) {
+          descriptorInfo match {
+            case MethodType(params, _) =>
+              val paramsNoOuter = if (hasOuterParam) params.tail else params
+              val newParams = paramsNoOuter match {
+                case init :+ _ if jflags.isSynthetic =>
+                  // scala/bug#7455 strip trailing dummy argument ("access constructor tag") from synthetic constructors which
+                  // are added when an inner class needs to access a private constructor.
+                  init
+                case _ =>
+                  paramsNoOuter
+              }
+              MethodType(newParams, clazz.tpe)
+            case info => info
+          }
+        } else {
+          descriptorInfo
         }
-      } else {
-        descriptorInfo
       }
       if (constant != null) {
         val c1 = convertTo(constant, info.resultType)
