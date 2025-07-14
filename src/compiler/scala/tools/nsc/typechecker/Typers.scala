@@ -665,9 +665,9 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
         settings.language.contains(featureName) || {
           def action(): Boolean = {
             if (!immediate)
-            debuglog(s"deferred check of feature $featureTrait")
-          def hasImport = inferImplicitByType(featureTrait.tpe, context).isSuccess
-           hasImport || {
+              debuglog(s"deferred check of feature $featureTrait")
+            def hasImport = inferImplicitByType(featureTrait.tpe, context).isSuccess
+            hasImport || {
               val Some(AnnotationInfo(_, List(Literal(Constant(featureDesc: String)), Literal(Constant(required: Boolean))), _)) =
                 featureTrait.getAnnotation(LanguageFeatureAnnot): @unchecked
               context.featureWarning(pos, featureName, featureDesc, featureTrait, construct, required)
@@ -5646,15 +5646,19 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
 
             if (tree.hasAttachment[PostfixAttachment.type])
               checkFeature(tree.pos, currentRun.runDefinitions.PostfixOpsFeature, name.decode)
-            val sym = tree1.symbol
-            if (sym != null && sym.isOnlyRefinementMember && !sym.isMacro)
-              checkFeature(tree1.pos, currentRun.runDefinitions.ReflectiveCallsFeature, sym.toString)
+            checkReflectiveCallsFeature(tree1)
 
             qualTyped.symbol match {
               case s: Symbol if s.isRootPackage => treeCopy.Ident(tree1, name)
               case _ => tree1
             }
           }
+      }
+
+      def checkReflectiveCallsFeature(tree: Tree): Unit = {
+        val sym = tree.symbol
+        if (sym != null && sym.isOnlyRefinementMember && !sym.isMacro)
+          checkFeature(tree.pos, currentRun.runDefinitions.ReflectiveCallsFeature, sym.toString)
       }
 
       /* A symbol qualifies if:
@@ -5782,6 +5786,7 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
                 // scala/bug#5967 Important to replace param type A* with Seq[A] when seen from from a reference,
                 // to avoid inference errors in pattern matching.
                 stabilize(tree2, pre2, mode, pt).modifyType(dropIllegalStarTypes)
+                  .tap(t => if (tree1 ne tree) checkReflectiveCallsFeature(t))
               }
             onSuccess.setAttachments(tree.attachments)
         }
