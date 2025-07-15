@@ -551,6 +551,49 @@ trait TypeDiagnostics extends splain.SplainDiagnostics {
         case _          => isConstantType(rhs.tpe) || isSingleType(rhs.tpe) || rhs.isInstanceOf[This]
       })
 
+    def handleRefTree(t: RefTree): Unit = {
+      val sym = t.symbol
+      if (isExisting(sym) && !currentOwner.hasTransOwner(sym) && !t.hasAttachment[ForAttachment.type])
+        recordReference(sym)
+    }
+
+    def handleTreeType(t: Tree): Unit =
+      if ((t.tpe ne null) && t.tpe != NoType) {
+        for (tp <- t.tpe if tp != NoType && !treeTypes(tp)) {
+          // Include references to private/local aliases (which might otherwise refer to an enclosing class)
+          val isAlias = {
+            val td = tp.typeSymbolDirect
+            td.isAliasType && (td.isLocalToBlock || td.isPrivate)
+          }
+          // Ignore type references to an enclosing class. A reference to C must be outside C to avoid warning.
+          if (isAlias || !currentOwner.hasTransOwner(tp.typeSymbol)) tp match {
+            case NoType | NoPrefix    =>
+            case NullaryMethodType(_) =>
+            case MethodType(_, _)     =>
+            case SingleType(_, _)     =>
+            case ConstantType(Constant(k: Type)) =>
+              log(s"classOf $k referenced from $currentOwner")
+              treeTypes += k
+            case _                    =>
+              log(s"${if (isAlias) "alias " else ""}$tp referenced from $currentOwner")
+              treeTypes += tp
+          }
+          for (annot <- tp.annotations)
+            descend(annot)
+        }
+        // e.g. val a = new Foo ; new a.Bar ; don't let a be reported as unused.
+        t.tpe.prefix foreach {
+          case SingleType(_, sym) => recordReference(sym)
+          case _                  => ()
+        }
+      }
+
+    def descend(annot: AnnotationInfo): Unit =
+      if (!annots(annot)) {
+        annots.addOne(annot)
+        traverse(annot.original)
+      }
+
     override def traverse(t: Tree): Unit = {
       t match {
         case t: ValDef if wasPatVarDef(t) => // include field excluded by qualifies test
@@ -616,10 +659,7 @@ trait TypeDiagnostics extends splain.SplainDiagnostics {
             case b @ Bind(n, _) if n != nme.DEFAULT_CASE => addPatVar(b)
             case _ =>
           }
-        case t: RefTree =>
-          val sym = t.symbol
-          if (isExisting(sym) && !currentOwner.hasTransOwner(sym) && !t.hasAttachment[ForAttachment.type])
-            recordReference(sym)
+        case t: RefTree => handleRefTree(t)
         case Assign(lhs, _) if isExisting(lhs.symbol) => setVars += lhs.symbol
         case Function(ps, _) if !t.isErrorTyped =>
           for (p <- ps) {
@@ -648,40 +688,7 @@ trait TypeDiagnostics extends splain.SplainDiagnostics {
         case _ =>
       }
 
-      def descend(annot: AnnotationInfo): Unit =
-        if (!annots(annot)) {
-          annots.addOne(annot)
-          traverse(annot.original)
-        }
-      if ((t.tpe ne null) && t.tpe != NoType) {
-        for (tp <- t.tpe if tp != NoType) if (!treeTypes(tp)) {
-          // Include references to private/local aliases (which might otherwise refer to an enclosing class)
-          val isAlias = {
-            val td = tp.typeSymbolDirect
-            td.isAliasType && (td.isLocalToBlock || td.isPrivate)
-          }
-          // Ignore type references to an enclosing class. A reference to C must be outside C to avoid warning.
-          if (isAlias || !currentOwner.hasTransOwner(tp.typeSymbol)) tp match {
-            case NoType | NoPrefix    =>
-            case NullaryMethodType(_) =>
-            case MethodType(_, _)     =>
-            case SingleType(_, _)     =>
-            case ConstantType(Constant(k: Type)) =>
-              log(s"classOf $k referenced from $currentOwner")
-              treeTypes += k
-            case _                    =>
-              log(s"${if (isAlias) "alias " else ""}$tp referenced from $currentOwner")
-              treeTypes += tp
-          }
-          for (annot <- tp.annotations)
-            descend(annot)
-        }
-        // e.g. val a = new Foo ; new a.Bar ; don't let a be reported as unused.
-        t.tpe.prefix foreach {
-          case SingleType(_, sym) => recordReference(sym)
-          case _                  => ()
-        }
-      }
+      handleTreeType(t)
 
       if (t.symbol != null && t.symbol.exists)
         for (annot <- t.symbol.annotations)
@@ -804,13 +811,10 @@ trait TypeDiagnostics extends splain.SplainDiagnostics {
       object refCollector extends Traverser {
         override def traverse(tree: Tree): Unit = {
           tree match {
-            case _: RefTree if isExisting(tree.symbol) => recordReference(tree.symbol)
+            case tree: RefTree => handleRefTree(tree)
             case _ =>
           }
-          if (tree.tpe != null) tree.tpe.prefix.foreach {
-            case SingleType(_, sym) => recordReference(sym)
-            case _ =>
-          }
+          handleTreeType(tree)
           super.traverse(tree)
         }
       }
