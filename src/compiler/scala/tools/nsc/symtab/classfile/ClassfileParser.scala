@@ -533,10 +533,16 @@ abstract class ClassfileParser(reader: ReusableInstance[ReusableDataReader]) {
 
       enterOwnInnerClasses()
 
-      clazz setInfo completer
-      clazz setFlag sflags
+      clazz.setInfo(completer)
+      clazz.setFlag(sflags)
+
+      // Kotlin interop (scala/bug#13110)
+      if (clazz.isAbstract)
+        clazz.resetFlag(Flags.FINAL)
+
       moduleClass setInfo staticInfo
       moduleClass setFlag JAVA
+
       staticModule setInfo moduleClass.tpe
       staticModule setFlag JAVA
 
