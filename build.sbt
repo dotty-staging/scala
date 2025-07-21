@@ -42,7 +42,7 @@ val jolDep            = "org.openjdk.jol"                % "jol-core"           
 val asmDep            = "org.scala-lang.modules"         % "scala-asm"                        % versionProps("scala-asm.version")
 val jlineDep          = "org.jline"                      % "jline"                            % versionProps("jline.version")     classifier "jdk8"
 val testInterfaceDep  = "org.scala-sbt"                  % "test-interface"                   % "1.0"
-val diffUtilsDep      = "io.github.java-diff-utils"      % "java-diff-utils"                  % "4.15"
+val diffUtilsDep      = "io.github.java-diff-utils"      % "java-diff-utils"                  % "4.16"
 val compilerInterfaceDep = "org.scala-sbt"               % "compiler-interface"               % "1.10.8"
 
 val projectFolder = settingKey[String]("subfolder in src when using configureAsSubproject, else the project name")
