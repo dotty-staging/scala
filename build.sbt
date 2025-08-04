@@ -441,8 +441,17 @@ def setForkedWorkingDirectory: Seq[Setting[_]] = {
   setting ++ inTask(run)(setting)
 }
 
+lazy val skipProjectInIDEs: Seq[Setting[_]] = Seq(
+  // The current project is not considered a bsp project.
+  // BSP clients will not see the current project and will not offer any IDE support.
+  bspEnabled := false,
+  // Additionally, the current project should not be imported in IntelliJ IDEA.
+  // The setting is defined in https://github.com/JetBrains/sbt-ide-settings?tab=readme-ov-file#using-the-settings-without-plugin
+  SettingKey[Boolean]("ide-skip-project") := !bspEnabled.value
+)
+
 // This project provides the STARR scalaInstance for bootstrapping
-lazy val bootstrap = project.in(file("target/bootstrap")).settings(bspEnabled := false)
+lazy val bootstrap = project.in(file("target/bootstrap")).settings(skipProjectInIDEs)
 
 lazy val library = configureAsSubproject(project)
   .settings(generatePropertiesFileSettings)
@@ -774,7 +783,6 @@ lazy val specLib = project.in(file("test") / "instrumented")
   .settings(fatalWarningsSettings)
   .settings(
     publish / skip := true,
-    bspEnabled := false,
     Compile / sourceGenerators += Def.task {
       import scala.collection.JavaConverters._
       val srcBase = (library / Compile / sourceDirectories).value.head / "scala/runtime"
@@ -796,6 +804,7 @@ lazy val specLib = project.in(file("test") / "instrumented")
       )
     }.taskValue,
   )
+  .settings(skipProjectInIDEs)
 
 // The scala version used by the benchmark suites, leave undefined to use the ambient version.")
 def benchmarkScalaVersion = System.getProperty("benchmark.scala.version", "")
@@ -818,10 +827,13 @@ lazy val bench = project.in(file("test") / "benchmarks")
     },
     //scalacOptions ++= Seq("-feature", "-opt:inline:scala/**", "-Wopt"),
     scalacOptions ++= Seq("-feature", "-opt:l:inline", "-opt-inline-from:scala/**", "-opt-warnings"),
+  )
+  .settings(inConfig(JmhPlugin.JmhKeys.Jmh)(scalabuild.JitWatchFilePlugin.jitwatchSettings))
+  .settings(
     // Skips JMH source generators during IDE import to avoid needing to compile scala-library during the import
     // should not be needed once sbt-jmh 0.4.3 is out (https://github.com/sbt/sbt-jmh/pull/207)
-    Jmh / bspEnabled := false
-  ).settings(inConfig(JmhPlugin.JmhKeys.Jmh)(scalabuild.JitWatchFilePlugin.jitwatchSettings))
+    inConfig(Jmh)(skipProjectInIDEs)
+  )
 
 
 lazy val testkit = configureAsSubproject(project)
@@ -954,7 +966,6 @@ def osgiTestProject(p: Project, framework: ModuleID) = p
   .settings(disableDocs)
   .settings(
     publish / skip := true,
-    bspEnabled := false,
     Test / fork := true,
     Test / parallelExecution := false,
     libraryDependencies ++= {
@@ -991,6 +1002,7 @@ def osgiTestProject(p: Project, framework: ModuleID) = p
     },
     cleanFiles += (ThisBuild / buildDirectory).value / "osgi"
   )
+  .settings(skipProjectInIDEs)
 
 lazy val verifyScriptedBoilerplate = taskKey[Unit]("Ensure scripted tests have the necessary boilerplate.")
 
@@ -1006,7 +1018,6 @@ lazy val sbtTest = project.in(file("test") / "sbt-test")
   .settings(
     scalaVersion := appConfiguration.value.provider.scalaProvider.version,
     publish / skip := true,
-    bspEnabled := false,
     target := (ThisBuild / target).value / thisProject.value.id,
 
     sbtTestDirectory := baseDirectory.value,
@@ -1056,6 +1067,7 @@ lazy val sbtTest = project.in(file("test") / "sbt-test")
       sbtBridge / publishLocal,
     ).evaluated
   )
+  .settings(skipProjectInIDEs)
 
 lazy val partestJavaAgent = configureAsSubproject(project, srcdir = Some("partest-javaagent"))
   .settings(fatalWarningsSettings)
@@ -1142,7 +1154,6 @@ lazy val scalaDist = Project("scalaDist", file(".") / "target" / "scala-dist-dis
   .settings(commonSettings)
   .settings(disableDocs)
   .settings(
-    bspEnabled := false,
     name := "scala-dist",
     Compile / packageBin / mappings ++= {
       val binBaseDir = buildDirectory.value / "pack"
@@ -1184,6 +1195,7 @@ lazy val scalaDist = Project("scalaDist", file(".") / "target" / "scala-dist-dis
     ),
     Compile / packageSrc / publishArtifact := false
   )
+  .settings(skipProjectInIDEs)
   .dependsOn(library, reflect, compiler, scalap)
 
 def partestOnly(in: String): Def.Initialize[Task[Unit]] =
@@ -1336,7 +1348,6 @@ lazy val distDependencies = Seq(replFrontend, compiler, library, reflect, scalap
 lazy val dist = (project in file("dist"))
   .settings(commonSettings)
   .settings(
-    bspEnabled := false,
     libraryDependencies += jlineDep,
     mkBin := mkBinImpl.value,
     mkQuick := Def.task {
@@ -1363,6 +1374,7 @@ lazy val dist = (project in file("dist"))
         .dependsOn(distDependencies.map(_ / Compile / packageBin / packagedArtifact): _*)
         .value
   )
+  .settings(skipProjectInIDEs)
   .dependsOn(distDependencies.map(p => p: ClasspathDep[ProjectReference]): _*)
 
 /**
