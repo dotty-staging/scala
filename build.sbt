@@ -447,7 +447,7 @@ lazy val skipProjectInIDEs: Seq[Setting[_]] = Seq(
   bspEnabled := false,
   // Additionally, the current project should not be imported in IntelliJ IDEA.
   // The setting is defined in https://github.com/JetBrains/sbt-ide-settings?tab=readme-ov-file#using-the-settings-without-plugin
-  SettingKey[Boolean]("ide-skip-project") := !bspEnabled.value
+  SettingKey[Boolean]("ide-skip-project").withRank(KeyRanks.Invisible) := !bspEnabled.value
 )
 
 // This project provides the STARR scalaInstance for bootstrapping
