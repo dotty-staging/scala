@@ -1378,7 +1378,7 @@ class Global(var currentSettings: Settings, reporter0: Reporter)
      */
     val parserPhase                  = phaseNamed("parser")
     val namerPhase                   = phaseNamed("namer")
-    // val packageobjectsPhase          = phaseNamed("packageobjects")
+    val packageobjectsPhase          = phaseNamed("packageobjects")
     val typerPhase                   = phaseNamed("typer")
     // val inlineclassesPhase           = phaseNamed("inlineclasses")
     // val superaccessorsPhase          = phaseNamed("superaccessors")
@@ -1484,7 +1484,7 @@ class Global(var currentSettings: Settings, reporter0: Reporter)
         showDef(splitClassAndPhase(settings.Xshowobj.value, term = true), declsOnly = false, globalPhase)
     }
 
-    // Similarly, this will only be created under -Yshow-syms.
+    // Similarly, this will only be created under -Vsymbols.
     object trackerFactory extends SymbolTrackers {
       val global: Global.this.type = Global.this
       lazy val trackers = currentRun.units.toList map (x => SymbolTracker(x))
@@ -1563,6 +1563,9 @@ class Global(var currentSettings: Settings, reporter0: Reporter)
 
         if (timePhases)
           informTime(globalPhase.description, phaseTimer.nanos)
+
+        if (reporter.hasErrors && !isPast(packageobjectsPhase))
+          packageobjectsPhase.run()
 
         // progress update
         if (settings.Xprint.containsPhase(globalPhase) || settings.printLate.value && runIsAt(cleanupPhase)) {
