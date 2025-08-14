@@ -75,11 +75,11 @@ trait Analyzer extends AnyRef
       val openPackageObjectsTraverser = new InternalTraverser {
         override def traverse(tree: Tree): Unit = tree match {
           case ModuleDef(_, _, _) =>
-            if (tree.symbol.name == nme.PACKAGEkw) {
-              // we've actually got a source file
-              deferredOpen.subtractOne(tree.symbol.owner)
-
-              openPackageModule(tree.symbol, tree.symbol.owner)
+            val sym = tree.symbol
+            if (sym.name == nme.PACKAGEkw) {
+              val owner = sym.owner
+              deferredOpen.subtractOne(owner) // we've actually got a source file
+              openPackageModule(sym, owner)
             }
           case ClassDef(_, _, _, _) => () // make it fast
           case _ => tree.traverse(this)
@@ -93,13 +93,12 @@ trait Analyzer extends AnyRef
       override def run(): Unit = {
         super.run()
 
-        for (sym <- deferredOpen.toVector) {
-          if (deferredOpen.remove(sym)) {
-            // this can remove entries from `deferredOpen`, hence the copy to a vector
-            // and the check of `remove` return value
-            openPackageModule(sym)
-          }
-        }
+        // openPackageModule can remove entries from `deferredOpen`, so make a defensive copy first,
+        // and then check whether `remove` says the sym is still deferred.
+        // `force` the open because we might be called earlier if the run is bailing on an early error.
+        for (sym <- deferredOpen.toVector)
+          if (deferredOpen.remove(sym))
+            openPackageModule(sym, force = true)
       }
     }
   }
