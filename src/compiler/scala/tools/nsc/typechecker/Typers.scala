@@ -5612,7 +5612,8 @@ trait Typers extends Adaptations with Tags with TypersTracking with PatternTyper
           // testing pos works and may suffice
           //openMacros exists (_.macroApplication.pos includes lit.pos)
           // tests whether the lit belongs to the expandee of an open macro
-          openMacros exists (_.macroApplication.attachments.get[MacroExpansionAttachment] match {
+          !lit.pos.isDefined ||
+          openMacros.exists(_.macroApplication.attachments.get[MacroExpansionAttachment] match {
             case Some(MacroExpansionAttachment(_, t: Tree)) => t exists (_ == lit)
             case _                                          => false
           })
