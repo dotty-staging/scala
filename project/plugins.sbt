@@ -10,18 +10,6 @@ libraryDependencies += "org.apache.commons" % "commons-lang3" % "3.18.0"
 
 libraryDependencies += "biz.aQute.bnd" % "biz.aQute.bndlib" % "6.1.0"
 
-enablePlugins(BuildInfoPlugin)
-
-// configure sbt-buildinfo to send the externalDependencyClasspath to the main build, which allows using it for the IntelliJ project config
-
-lazy val buildClasspath = taskKey[String]("Colon-separated (or semicolon-separated in case of Windows) list of entries on the sbt build classpath.")
-
-buildClasspath := (Compile / externalDependencyClasspath).value.map(_.data).mkString(java.io.File.pathSeparator)
-
-buildInfoKeys := Seq[BuildInfoKey](buildClasspath)
-
-buildInfoPackage := "scalabuild"
-
 addSbtPlugin("com.typesafe" % "sbt-mima-plugin" % "1.1.4")
 
 libraryDependencies ++= Seq(
