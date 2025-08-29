@@ -5291,6 +5291,12 @@ trait Types
       } finally res = saved
     }
 
+    private def needClearBaseTypeCache(ct: CompoundType) = {
+      // was `ct.baseClasses.exists(changedSymbols)`, but `baseClasses` may force types early (scala/bug#13112)
+      val cache = ct.baseTypeSeqCache
+      cache != null && changedSymbols.exists(cache.baseTypeIndex(_) >= 0)
+    }
+
     def apply(tp: Type): Unit = tp match {
       case _ if seen.containsKey(tp) =>
 
@@ -5304,7 +5310,7 @@ trait Types
         }
         seen.put(tp, res)
 
-      case ct: CompoundType if ct.baseClasses.exists(changedSymbols) =>
+      case ct: CompoundType if needClearBaseTypeCache(ct) =>
         ct.invalidatedCompoundTypeCaches()
         res = true
         seen.put(tp, res)
