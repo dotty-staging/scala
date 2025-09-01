@@ -378,8 +378,17 @@ def setForkedWorkingDirectory: Seq[Setting[_]] = {
   setting ++ inTask(run)(setting)
 }
 
+lazy val skipProjectInIDEs: Seq[Setting[_]] = Seq(
+  // The current project is not considered a bsp project.
+  // BSP clients will not see the current project and will not offer any IDE support.
+  bspEnabled := false,
+  // Additionally, the current project should not be imported in IntelliJ IDEA.
+  // The setting is defined in https://github.com/JetBrains/sbt-ide-settings?tab=readme-ov-file#using-the-settings-without-plugin
+  SettingKey[Boolean]("ide-skip-project").withRank(KeyRanks.Invisible) := !bspEnabled.value
+)
+
 // This project provides the STARR scalaInstance for bootstrapping
-lazy val bootstrap = project in file("target/bootstrap")
+lazy val bootstrap = project.in(file("target/bootstrap")).settings(skipProjectInIDEs)
 
 lazy val library = configureAsSubproject(project)
   .settings(generatePropertiesFileSettings)
@@ -696,6 +705,7 @@ lazy val specLib = project.in(file("test") / "instrumented")
       )
     }.taskValue
   )
+  .settings(skipProjectInIDEs)
 
 lazy val bench = project.in(file("test") / "benchmarks")
   .dependsOn(library, compiler)
@@ -709,6 +719,11 @@ lazy val bench = project.in(file("test") / "benchmarks")
     compileOrder := CompileOrder.JavaThenScala, // to allow inlining from Java ("... is defined in a Java source (mixed compilation), no bytecode is available")
     scalacOptions ++= Seq("-feature", "-opt:l:inline", "-opt-inline-from:scala/**", "-opt-warnings"),
   ).settings(inConfig(JmhPlugin.JmhKeys.Jmh)(scalabuild.JitWatchFilePlugin.jitwatchSettings))
+  .settings(
+    // Skips JMH source generators during IDE import to avoid needing to compile scala-library during the import
+    // should not be needed once sbt-jmh 0.4.3 is out (https://github.com/sbt/sbt-jmh/pull/207)
+    inConfig(Jmh)(skipProjectInIDEs)
+  )
 
 // Jigsaw: reflective access between modules (`setAccessible(true)`) requires an `opens` directive.
 // This is enforced by error (not just by warning) since JDK 16. In our tests we use reflective access
@@ -811,6 +826,7 @@ def osgiTestProject(p: Project, framework: ModuleID) = p
     },
     cleanFiles += (ThisBuild / buildDirectory).value / "osgi"
   )
+  .settings(skipProjectInIDEs)
 
 lazy val partestJavaAgent = Project("partest-javaagent", file(".") / "src" / "partest-javaagent")
   .settings(commonSettings)
@@ -908,6 +924,7 @@ lazy val libraryAll = Project("library-all", file(".") / "target" / "library-all
       "/project/description" -> <description>The Scala Standard Library and Official Modules</description>
     )
   )
+  .settings(skipProjectInIDEs)
   .dependsOn(library, reflect)
 
 lazy val scalaDist = Project("scala-dist", file(".") / "target" / "scala-dist-dist-src-dummy")
@@ -954,6 +971,7 @@ lazy val scalaDist = Project("scala-dist", file(".") / "target" / "scala-dist-di
     ),
     (Compile / packageSrc / publishArtifact) := false
   )
+  .settings(skipProjectInIDEs)
   .dependsOn(libraryAll, compiler, scalap)
 
 lazy val scala2: Project = (project in file("."))
@@ -1100,6 +1118,7 @@ lazy val dist = (project in file("dist"))
         .dependsOn(distDependencies.map((_ / Runtime / packageBin/ packagedArtifact)): _*)
         .value
   )
+  .settings(skipProjectInIDEs)
   .dependsOn(distDependencies.map(p => p: ClasspathDep[ProjectReference]): _*)
 
 /**
