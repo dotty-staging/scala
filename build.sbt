@@ -378,8 +378,17 @@ def setForkedWorkingDirectory: Seq[Setting[_]] = {
   setting ++ inTask(run)(setting)
 }
 
+lazy val skipProjectInIDEs: Seq[Setting[_]] = Seq(
+  // The current project is not considered a bsp project.
+  // BSP clients will not see the current project and will not offer any IDE support.
+  bspEnabled := false,
+  // Additionally, the current project should not be imported in IntelliJ IDEA.
+  // The setting is defined in https://github.com/JetBrains/sbt-ide-settings?tab=readme-ov-file#using-the-settings-without-plugin
+  SettingKey[Boolean]("ide-skip-project").withRank(KeyRanks.Invisible) := !bspEnabled.value
+)
+
 // This project provides the STARR scalaInstance for bootstrapping
-lazy val bootstrap = project in file("target/bootstrap")
+lazy val bootstrap = project.in(file("target/bootstrap")).settings(skipProjectInIDEs)
 
 lazy val library = configureAsSubproject(project)
   .settings(generatePropertiesFileSettings)
@@ -696,6 +705,7 @@ lazy val specLib = project.in(file("test") / "instrumented")
       )
     }.taskValue
   )
+  .settings(skipProjectInIDEs)
 
 lazy val bench = project.in(file("test") / "benchmarks")
   .dependsOn(library, compiler)
@@ -709,6 +719,11 @@ lazy val bench = project.in(file("test") / "benchmarks")
     compileOrder := CompileOrder.JavaThenScala, // to allow inlining from Java ("... is defined in a Java source (mixed compilation), no bytecode is available")
     scalacOptions ++= Seq("-feature", "-opt:l:inline", "-opt-inline-from:scala/**", "-opt-warnings"),
   ).settings(inConfig(JmhPlugin.JmhKeys.Jmh)(scalabuild.JitWatchFilePlugin.jitwatchSettings))
+  .settings(
+    // Skips JMH source generators during IDE import to avoid needing to compile scala-library during the import
+    // should not be needed once sbt-jmh 0.4.3 is out (https://github.com/sbt/sbt-jmh/pull/207)
+    inConfig(Jmh)(skipProjectInIDEs)
+  )
 
 // Jigsaw: reflective access between modules (`setAccessible(true)`) requires an `opens` directive.
 // This is enforced by error (not just by warning) since JDK 16. In our tests we use reflective access
@@ -811,6 +826,7 @@ def osgiTestProject(p: Project, framework: ModuleID) = p
     },
     cleanFiles += (ThisBuild / buildDirectory).value / "osgi"
   )
+  .settings(skipProjectInIDEs)
 
 lazy val partestJavaAgent = Project("partest-javaagent", file(".") / "src" / "partest-javaagent")
   .settings(commonSettings)
@@ -908,6 +924,7 @@ lazy val libraryAll = Project("library-all", file(".") / "target" / "library-all
       "/project/description" -> <description>The Scala Standard Library and Official Modules</description>
     )
   )
+  .settings(skipProjectInIDEs)
   .dependsOn(library, reflect)
 
 lazy val scalaDist = Project("scala-dist", file(".") / "target" / "scala-dist-dist-src-dummy")
@@ -954,6 +971,7 @@ lazy val scalaDist = Project("scala-dist", file(".") / "target" / "scala-dist-di
     ),
     (Compile / packageSrc / publishArtifact) := false
   )
+  .settings(skipProjectInIDEs)
   .dependsOn(libraryAll, compiler, scalap)
 
 lazy val scala2: Project = (project in file("."))
@@ -1100,6 +1118,7 @@ lazy val dist = (project in file("dist"))
         .dependsOn(distDependencies.map((_ / Runtime / packageBin/ packagedArtifact)): _*)
         .value
   )
+  .settings(skipProjectInIDEs)
   .dependsOn(distDependencies.map(p => p: ClasspathDep[ProjectReference]): _*)
 
 /**
@@ -1209,167 +1228,8 @@ commands ++= {
 
 addCommandAlias("scalap",   "scalap/compile:runMain              scala.tools.scalap.Main -usejavacp")
 
-lazy val intellij = taskKey[Unit]("Update the library classpaths in the IntelliJ project files.")
-
-def moduleDeps(p: Project, config: Configuration = Compile) = (p / config / externalDependencyClasspath).map(a => (p.id, a.map(_.data)))
-
 // aliases to projects to prevent name clashes
-def compilerP = compiler
 def testP = test
-
-intellij := {
-  import xml._
-  import xml.transform._
-
-  val s = streams.value
-  val compilerScalaInstance = (LocalProject("compiler") / scalaInstance).value
-
-  val modules: List[(String, Seq[File])] = {
-    // for the sbt build module, the dependencies are fetched from the project's build using sbt-buildinfo
-    val buildModule = ("scala-build", scalabuild.BuildInfo.buildClasspath.split(java.io.File.pathSeparator).toSeq.map(new File(_)))
-    // `sbt projects` lists all modules in the build
-    buildModule :: List(
-      moduleDeps(bench).value,
-      moduleDeps(compilerP).value,
-      // moduleDeps(dist).value,                // No sources, therefore no module in IntelliJ
-      moduleDeps(interactive).value,
-      moduleDeps(junit).value,
-      moduleDeps(library).value,
-      // moduleDeps(libraryAll).value,          // No sources
-      moduleDeps(manual).value,
-      moduleDeps(partest).value,
-      moduleDeps(partestJavaAgent).value,
-      moduleDeps(reflect).value,
-      moduleDeps(repl).value,
-      moduleDeps(replJline).value,
-      // moduleDeps(replJlineEmbedded).value,   // No sources
-      // moduleDeps(root).value,                // No sources
-      // moduleDeps(scalaDist).value,           // No sources
-      moduleDeps(scalacheck, config = Test).value,
-      moduleDeps(scaladoc).value,
-      moduleDeps(scalap).value,
-      moduleDeps(testP).value,
-      moduleDeps(compilerOptionsExporter).value
-    )
-  }
-
-  def moduleDep(name: String, jars: Seq[File]) = {
-    val entries = jars.map(f => s"""        <root url="jar://${f.toURI.getPath}!/" />""").mkString("\n")
-    s"""|    <library name="$name-deps">
-        |      <CLASSES>
-        |$entries
-        |      </CLASSES>
-        |      <JAVADOC />
-        |      <SOURCES />
-        |    </library>""".stripMargin
-  }
-
-  def starrDep(jars: Seq[File]) = {
-    val entries = jars.map(f => s"""          <root url="file://${f.toURI.getPath}" />""").mkString("\n")
-    s"""|    <library name="starr" type="Scala">
-        |      <properties>
-        |        <option name="languageLevel" value="Scala_2_12" />
-        |        <compiler-classpath>
-        |$entries
-        |        </compiler-classpath>
-        |      </properties>
-        |      <CLASSES />
-        |      <JAVADOC />
-        |      <SOURCES />
-        |    </library>""".stripMargin
-  }
-
-  def replaceLibrary(data: Node, libName: String, libType: Option[String], newContent: String) = {
-    object rule extends RewriteRule {
-      var transformed = false
-      def checkAttrs(attrs: MetaData) = {
-        def check(key: String, expected: String) = {
-          val a = attrs(key)
-          a != null && a.text == expected
-        }
-        check("name", libName) && libType.forall(tp => check("type", tp))
-      }
-
-      override def transform(n: Node): Seq[Node] = n match {
-        case e @ Elem(_, "library", attrs, _, _, _*) if checkAttrs(attrs) =>
-          transformed = true
-          XML.loadString(newContent)
-        case other =>
-          other
-      }
-    }
-    object trans extends RuleTransformer(rule)
-    val r = trans(data)
-    if (!rule.transformed) sys.error(s"Replacing library classpath for $libName failed, no existing library found.")
-    r
-  }
-
-  val intellijDir = (ThisBuild / baseDirectory).value / "src/intellij"
-  val ipr = intellijDir / "scala.ipr"
-  backupIdea(intellijDir)
-  if (!ipr.exists) {
-    intellijCreateFromSample((ThisBuild / baseDirectory).value)
-  }
-  s.log.info("Updating library classpaths in src/intellij/scala.ipr.")
-  val content = XML.loadFile(ipr)
-
-  val newStarr = replaceLibrary(content, "starr", Some("Scala"), starrDep(compilerScalaInstance.allJars))
-  val newModules = modules.foldLeft(newStarr)({
-    case (res, (modName, jars)) =>
-      if (jars.isEmpty) res // modules without dependencies
-      else replaceLibrary(res, s"$modName-deps", None, moduleDep(modName, jars))
-  })
-
-  // I can't figure out how to keep the entity escapes for \n in the attribute values after this use of XML transform.
-  // Patching the original version back in with more brutish parsing.
-  val R = """(?ims)(.*)(<copyright>.*</copyright>)(.*)""".r
-  val oldContents = IO.read(ipr)
-  XML.save(ipr.getAbsolutePath, newModules)
-  oldContents match {
-    case R(_, withEscapes, _) =>
-      val newContents = IO.read(ipr)
-      val R(pre, toReplace, post) = newContents
-      IO.write(ipr, pre + withEscapes + post)
-    case _ =>
-      // .ipr file hasn't been updated from `intellijFromSample` yet
-  }
-}
-
-lazy val intellijFromSample = taskKey[Unit]("Create fresh IntelliJ project files from src/intellij/*.SAMPLE.")
-
-def backupIdea(ideaDir: File): Unit = {
-  val temp = IO.createTemporaryDirectory
-  IO.copyDirectory(ideaDir, temp)
-  println(s"Backed up existing src/intellij to $temp")
-}
-
-intellijFromSample := {
-  val s = streams.value
-  val intellijDir = (ThisBuild / baseDirectory).value / "src/intellij"
-  val ipr = intellijDir / "scala.ipr"
-  backupIdea(intellijDir)
-  intellijCreateFromSample((ThisBuild / baseDirectory).value)
-}
-
-def intellijCreateFromSample(basedir: File): Unit = {
-  val files = basedir / "src/intellij" * "*.SAMPLE"
-  val copies = files.get.map(f => (f, new File(f.getAbsolutePath.stripSuffix(".SAMPLE"))))
-  IO.copy(copies, CopyOptions() withOverwrite true)
-}
-
-lazy val intellijToSample = taskKey[Unit]("Update src/intellij/*.SAMPLE using the current IntelliJ project files.")
-
-intellijToSample := {
-  val s = streams.value
-  val intellijDir = (ThisBuild / baseDirectory).value / "src/intellij"
-  val ipr = intellijDir / "scala.ipr"
-  backupIdea(intellijDir)
-  val existing =intellijDir * "*.SAMPLE"
-  IO.delete(existing.get)
-  val current = intellijDir * ("*.iml" || "*.ipr")
-  val copies = current.get.map(f => (f, new File(f.getAbsolutePath + ".SAMPLE")))
-  IO.copy(copies)
-}
 
 /** Find a specific module's JAR in a classpath, comparing only organization and name */
 def findJar(files: Seq[Attributed[File]], dep: ModuleID): Option[Attributed[File]] = {
