@@ -24,11 +24,17 @@ class C2 extends Derived2 {
 }
 */
 
+class Derived extends Derived2 // no warn, all foo are already members of Derived2
+
 trait T1 {
   def foo = 0
 }
 
 class Mixed extends Base with T1 // warn here
+
+class Inverted extends T1 {
+  def foo(implicit a: T) = 0 // warn although x.foo picks this one
+}
 
 class D {
   def foo(a: List[Int])(implicit d: DummyImplicit) = 0
@@ -77,9 +83,15 @@ trait PDerived extends PBase {
   def g[A] = f[A] // no warn
 }
 
+trait Matchers {
+  def an[A: reflect.ClassTag] = ()
+  val an = new Object // warn
+}
+object InnocentTest extends Matchers
+
 object Test extends App {
   implicit val t: T = new T {}
-  val d1 = new Derived1 {} // warn
+  val d1 = new Derived1 {} // no warn innocent client, already warned in evil parent
   println(d1.foo) // !
   val more = new MoreInspiration
   println(more.foo) // ?
