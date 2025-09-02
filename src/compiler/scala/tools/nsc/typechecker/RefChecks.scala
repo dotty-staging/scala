@@ -213,30 +213,28 @@ abstract class RefChecks extends Transform {
             else isCompetitive(syms, sawNlly, sawNonNlly)
           case _ => false
         })
-      for ((_, syms) <- byName if syms.lengthCompare(1) > 0 && isCompetitive(syms, sawNlly=false, sawNonNlly=false)) {
-        val (nullaries, alts) = syms.partition(sym => isNullary(sym.info))
-        //assert(!alts.isEmpty)
-        nullaries match {
-          case nullary :: Nil =>
-            if (warnable(syms))
-              warnDubious(nullary, alts)
-          case nullaries =>
-            //assert(!nullaries.isEmpty)
-            val dealiased =
-              nullaries.find(_.isPrivateLocal) match {
-                case Some(local) =>
-                  nullaries.find(sym => sym.isAccessor && sym.accessed == local) match {
-                    case Some(accessor) => nullaries.filter(_ != local) // drop local if it has an accessor
-                    case _ => nullaries
-                  }
-                case _ => nullaries
-              }
-            // there are multiple exactly for a private local and an inherited member
-            if (warnable(syms))
+      for ((_, syms) <- byName)
+        if (syms.lengthCompare(1) > 0 && isCompetitive(syms, sawNlly = false, sawNonNlly = false) && warnable(syms)) {
+          val (nullaries, alts) = syms.partition(sym => isNullary(sym.info))
+          //assert(!alts.isEmpty)
+          nullaries match {
+            case nullary :: Nil => warnDubious(nullary, alts)
+            case nullaries =>
+              //assert(!nullaries.isEmpty)
+              val dealiased =
+                nullaries.find(_.isPrivateLocal) match {
+                  case Some(local) =>
+                    nullaries.find(sym => sym.isAccessor && sym.accessed == local) match {
+                      case Some(accessor) => nullaries.filter(_ != local) // drop local if it has an accessor
+                      case _ => nullaries
+                    }
+                  case _ => nullaries
+                }
+              // there are multiple exactly for a private local and an inherited member
               for (nullary <- dealiased)
                 warnDubious(nullary, nullary :: alts) // add (other) nullary to list of alts to show as overloads
+          }
         }
-      }
     }
 
 // Override checking ------------------------------------------------------------
