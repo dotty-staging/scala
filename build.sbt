@@ -1208,6 +1208,7 @@ lazy val scala2: Project = (project in file("."))
   .settings(disableDocs)
   .settings(generateBuildCharacterFileSettings)
   .settings(
+    name := "Scala 2.13", // project name in IntelliJ
     publish / skip := true,
     commands ++= ScriptCommands.all,
     extractBuildCharacterPropertiesFile := {
