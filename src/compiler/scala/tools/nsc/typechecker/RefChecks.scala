@@ -160,6 +160,8 @@ abstract class RefChecks extends Transform {
         })
       }
     }
+    // warn if clazz defines nullary member `m` where `def m(implicit t: T)` is also defined, or conversely.
+    // That is confusing because the expression `m` might invoke either member.
     private def checkDubiousOverloads(clazz: Symbol): Unit = if (settings.warnDubiousOverload) {
       // nullary members or methods with leading implicit params
       def ofInterest(tp: Type): Boolean = tp match {
@@ -173,6 +175,12 @@ abstract class RefChecks extends Transform {
         case PolyType(_, rt) => isNullary(rt)
         case _ => true // includes NullaryMethodType
       }
+      // if all the competing symbols are members of a base class of clazz, don't warn in clazz, since the base warns
+      def warnable(syms: List[Symbol]): Boolean =
+        !clazz.baseClasses.drop(1).exists { base =>
+          val members = base.info.members
+          syms.forall(sym => members.lookupSymbolEntry(sym) != null)
+        }
       def warnDubious(sym: Symbol, alts: List[Symbol]): Unit = {
         val usage = if (sym.isMethod && !sym.isGetter) "Calls to parameterless" else "Usages of"
         val simpl = "a single implicit parameter list"
@@ -205,27 +213,28 @@ abstract class RefChecks extends Transform {
             else isCompetitive(syms, sawNlly, sawNonNlly)
           case _ => false
         })
-      for ((_, syms) <- byName if syms.lengthCompare(1) > 0 && isCompetitive(syms, sawNlly=false, sawNonNlly=false)) {
-        val (nullaries, alts) = syms.partition(sym => isNullary(sym.info))
-        //assert(!alts.isEmpty)
-        nullaries match {
-          case nullary :: Nil => warnDubious(nullary, syms)
-          case nullaries =>
-            //assert(!nullaries.isEmpty)
-            val dealiased =
-              nullaries.find(_.isPrivateLocal) match {
-                case Some(local) =>
-                  nullaries.find(sym => sym.isAccessor && sym.accessed == local) match {
-                    case Some(accessor) => nullaries.filter(_ != local) // drop local if it has an accessor
-                    case _ => nullaries
-                  }
-                case _ => nullaries
-              }
-            // there are multiple exactly for a private local and an inherited member
-            for (nullary <- dealiased)
-              warnDubious(nullary, nullary :: alts)
+      for ((_, syms) <- byName)
+        if (syms.lengthCompare(1) > 0 && isCompetitive(syms, sawNlly = false, sawNonNlly = false) && warnable(syms)) {
+          val (nullaries, alts) = syms.partition(sym => isNullary(sym.info))
+          //assert(!alts.isEmpty)
+          nullaries match {
+            case nullary :: Nil => warnDubious(nullary, alts)
+            case nullaries =>
+              //assert(!nullaries.isEmpty)
+              val dealiased =
+                nullaries.find(_.isPrivateLocal) match {
+                  case Some(local) =>
+                    nullaries.find(sym => sym.isAccessor && sym.accessed == local) match {
+                      case Some(accessor) => nullaries.filter(_ != local) // drop local if it has an accessor
+                      case _ => nullaries
+                    }
+                  case _ => nullaries
+                }
+              // there are multiple exactly for a private local and an inherited member
+              for (nullary <- dealiased)
+                warnDubious(nullary, nullary :: alts) // add (other) nullary to list of alts to show as overloads
+          }
         }
-      }
     }
 
 // Override checking ------------------------------------------------------------
