@@ -1014,7 +1014,7 @@ self =>
       def mkNamed(args: List[Tree]) = if (!isExpr) args else
         args.map(treeInfo.assignmentToMaybeNamedArg(_))
           .tap(res => if (currentRun.isScala3 && args.lengthCompare(1) == 0 && (args.head ne res.head))
-            deprecationWarning(args.head.pos.point, "named argument is deprecated for infix syntax", since="2.13.16"))
+            migrationWarning(args.head.pos.point, "named argument is deprecated for infix syntax", since="2.13.16"))
       var isMultiarg = false
       val arguments = right match {
         case Parens(Nil)               => literalUnit :: Nil
