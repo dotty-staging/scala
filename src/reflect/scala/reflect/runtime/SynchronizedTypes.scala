@@ -69,6 +69,9 @@ private[reflect] trait SynchronizedTypes extends internal.Types { self: SymbolTa
   private lazy val _pendingSubTypes = mkThreadLocalStorage(new mutable.HashSet[SubTypePair])
   override def pendingSubTypes = _pendingSubTypes.get
 
+  private lazy val _knownFalseSubTypes = mkThreadLocalStorage(new mutable.HashMap[Type, Type])
+  override def knownFalseSubTypes = _knownFalseSubTypes.get
+
   private lazy val _basetypeRecursions = mkThreadLocalStorage(0)
   override def basetypeRecursions = _basetypeRecursions.get
   override def basetypeRecursions_=(value: Int) = _basetypeRecursions.set(value)

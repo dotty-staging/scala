@@ -30,6 +30,9 @@ trait TypeComparers {
   private[this] val _pendingSubTypes = new mutable.HashSet[SubTypePair]
   def pendingSubTypes = _pendingSubTypes
 
+  private[this] val _knownFalseSubTypes = new mutable.HashMap[Type, Type]
+  def knownFalseSubTypes = _knownFalseSubTypes
+
   final case class SubTypePair(tp1: Type, tp2: Type) {
     // scala/bug#8146 we used to implement equality here in terms of pairwise =:=.
     //         But, this was inconsistent with hashCode, which was based on the
@@ -84,9 +87,10 @@ trait TypeComparers {
     }
   } finally {
     subsametypeRecursions -= 1
-    // XXX AM TODO: figure out when it is safe and needed to clear the log -- the commented approach below is too eager (it breaks #3281, #3866)
-    // it doesn't help to keep separate recursion counts for the three methods that now share it
-    // if (subsametypeRecursions == 0) undoLog.clear()
+    if (subsametypeRecursions == 0) {
+      knownFalseSubTypes.clear()
+      // undoLog.clear() // too eager, breaks #3281, #3866
+    }
   }
 
   def isDifferentTypeConstructor(tp1: Type, tp2: Type) = !isSameTypeConstructor(tp1, tp2)
@@ -121,9 +125,10 @@ trait TypeComparers {
   }
   finally {
     subsametypeRecursions -= 1
-    // XXX AM TODO: figure out when it is safe and needed to clear the log -- the commented approach below is too eager (it breaks #3281, #3866)
-    // it doesn't help to keep separate recursion counts for the three methods that now share it
-    // if (subsametypeRecursions == 0) undoLog.clear()
+    if (subsametypeRecursions == 0) {
+      knownFalseSubTypes.clear()
+      // undoLog.clear() // too eager, breaks #3281, #3866
+    }
   }
 
   // @pre: at least one argument has annotations
@@ -291,16 +296,20 @@ trait TypeComparers {
 
     try result = { // if subtype test fails, it should not affect constraints on typevars
       if (subsametypeRecursions >= LogPendingSubTypesThreshold) {
-        val p = new SubTypePair(tp1, tp2)
-        if (pendingSubTypes(p))
+        val p = SubTypePair(tp1, tp2)
+        if (pendingSubTypes(p)) {
+          knownFalseSubTypes(tp1) = tp2 // see scala/bug#13119
           false // see neg/t8146-no-finitary*
-        else
+        } else
           try {
             pendingSubTypes += p
             isSubType1(tp1, tp2, depth)
           } finally {
             pendingSubTypes -= p
           }
+      } else if (!knownFalseSubTypes.isEmpty && knownFalseSubTypes.get(tp1).contains(tp2)) {
+        // redundant `isEmtpy` check is probably premature optimization, but isSubType is perf sensitive
+        false
       } else {
         isSubType1(tp1, tp2, depth)
       }
@@ -309,9 +318,10 @@ trait TypeComparers {
     result
   } finally {
     subsametypeRecursions -= 1
-    // XXX AM TODO: figure out when it is safe and needed to clear the log -- the commented approach below is too eager (it breaks #3281, #3866)
-    // it doesn't help to keep separate recursion counts for the three methods that now share it
-    // if (subsametypeRecursions == 0) undoLog.clear()
+    if (subsametypeRecursions == 0) {
+      knownFalseSubTypes.clear()
+      // undoLog.clear() // too eager, breaks #3281, #3866
+    }
   }
 
   /** Check whether the subtype or type equivalence relationship
