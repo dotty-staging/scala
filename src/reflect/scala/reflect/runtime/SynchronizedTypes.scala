@@ -18,6 +18,7 @@ import scala.collection.mutable
 import java.lang.ref.{WeakReference => jWeakRef}
 import scala.ref.{WeakReference => sWeakRef}
 import scala.reflect.internal.Depth
+import java.util.IdentityHashMap
 
 /** This trait overrides methods in reflect.internal, bracketing
  *  them in synchronized { ... } to make them thread-safe
@@ -69,7 +70,7 @@ private[reflect] trait SynchronizedTypes extends internal.Types { self: SymbolTa
   private lazy val _pendingSubTypes = mkThreadLocalStorage(new mutable.HashSet[SubTypePair])
   override def pendingSubTypes = _pendingSubTypes.get
 
-  private lazy val _knownFalseSubTypes = mkThreadLocalStorage(new mutable.HashMap[Type, Type])
+  private lazy val _knownFalseSubTypes = mkThreadLocalStorage(new IdentityHashMap[Type, List[Type]])
   override def knownFalseSubTypes = _knownFalseSubTypes.get
 
   private lazy val _basetypeRecursions = mkThreadLocalStorage(0)
