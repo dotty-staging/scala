@@ -203,6 +203,11 @@ object AssertUtil {
   def assertSameElements[A, B >: A](expected: Array[A], actual: Array[B], message: String): Unit =
     assertSameElements(expected.toIndexedSeq, actual.toIndexedSeq, message)
 
+  @nowarn("msg=This catches all Throwables")
+  private def safeString(x: AnyRef): String =
+    try String.valueOf(x)
+    catch (t: Throwable) => t.getMessage
+
   /** Value is not strongly reachable from roots after body is evaluated.
    */
   def assertNotReachable[A <: AnyRef](a: => A, roots: AnyRef*)(body: => Unit): Unit = {
@@ -216,7 +221,8 @@ object AssertUtil {
         val o: AnyRef = stack.pop()
         if (o != null && !seen.containsKey(o)) {
           seen.put(o, ())
-          assertFalse(s"Root $root held reference $o", ref.hasReferent(o))
+          if (ref.hasReferent(o))
+            fail(s"Root ${safeString(root)} held reference ${safeString(o)}")
           o match {
             case a: Array[AnyRef] =>
               a.foreach(e => if (e != null && !e.isInstanceOf[Reference[_]]) stack.push(e))
