@@ -292,11 +292,12 @@ trait Unapplies extends ast.TreeDSL {
       val argss = mmap(paramss)(toIdent)
       val body: Tree = New(classTpe, argss)
       val synth = Modifiers(SYNTHETIC)
-      val copyMods =
-        if (currentRun.isScala3) {
+      val copyMods = {
+        val inheritFlag = currentRun.sourceFeatures.caseApplyCopyAccess
+        if (currentRun.isScala3 || inheritFlag) {
           val inheritedMods = constrMods(cdef)
           val mods3 = Modifiers(SYNTHETIC | (inheritedMods.flags & AccessFlags), inheritedMods.privateWithin)
-          if (currentRun.sourceFeatures.caseApplyCopyAccess) mods3
+          if (inheritFlag) mods3
           else {
             if (mods3 != synth)
               runReporting.warning(cdef.namePos, "access modifiers for `copy` method are copied from the case class constructor under Scala 3 (or with -Xsource-features:case-apply-copy-access)", Scala3Migration, cdef.symbol)
@@ -304,6 +305,7 @@ trait Unapplies extends ast.TreeDSL {
           }
         }
         else synth
+      }
       atPos(cdef.pos.focus)(
         DefDef(copyMods, nme.copy, tparams, paramss, TypeTree(), body)
       )
