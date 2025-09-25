@@ -251,7 +251,7 @@ case class ConstantPool(len: Int) {
     val i = index - 1
     values(i) getOrElse {
       val value = buffer(i)(this)
-      buffer(i) = null
+      buffer(i) = null.asInstanceOf[ConstantPool => Any]
       values(i) = Some(value)
       value
     }

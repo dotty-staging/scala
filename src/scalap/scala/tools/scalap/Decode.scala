@@ -54,6 +54,7 @@ object Decode {
     import classFile._
 
     classFile annotation SCALA_SIG_ANNOTATION map { case Annotation(_, els) =>
+      import scala.language.unsafeNulls
       val bytesElem = els.find(x => constant(x.elementNameIndex) == BYTES_VALUE).orNull
       val _bytes    = bytesElem.elementValue match { case ConstValueIndex(x) => constantWrapped(x) }
       val bytes     = _bytes.asInstanceOf[StringBytesPair].bytes
