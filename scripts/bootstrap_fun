@@ -144,6 +144,8 @@ buildQuick() {
   clearIvyCache
   if [ "$publishToSonatype" = "yes" ]; then
     invokeQuickInternal \
+      'set pgpSigningKey in Global := Some(new java.math.BigInteger("C03EF1D7D692BCFF", 16).longValue)' \
+      'set pgpPassphrase in Global := Some(Array.empty)' \
       "setupBootstrapPublish \"$BOOTSTRAP_REPO_DIR\" $SCALA_VER" \
       $clean $publishSonatypeTaskCore sonaUpload
   else
