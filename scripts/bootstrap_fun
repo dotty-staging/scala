@@ -18,7 +18,7 @@
 
 # Credentials
 #  - `PRIVATE_REPO_PASS` password for `scala-ci` user on scala-ci.typesafe.com/artifactory
-#  - `SONA_USER` / `SONA_PASS` for sonatype
+#  - `SONATYPE_USERNAME` / `SONATYPE_PASSWORD` for sonatype central repository
 
 
 publishPrivateTask=${publishPrivateTask-"publish"}
@@ -89,44 +89,6 @@ removeExistingBuilds() {
   fi
 }
 
-pollForStagingReposClosed() {
-  OK=false
-
-  for i in $(seq 1 10); do
-    OK=true
-    for repo in $1; do
-      if [[ "$(st_stagingRepoStatus $repo)" != "closed" ]]; then
-        echo "Staging repo $repo not yet closed, waiting 30 seconds ($i / 10)"
-        OK=false
-        break
-      fi
-    done
-    if [ "$OK" = "true" ]; then break; fi
-    sleep 30s
-  done
-
-  if [ "$OK" = "false" ]; then
-    echo "Failed to close staging repos in 5 minutes: $1"
-    exit 1
-  fi
-}
-
-closeStagingRepos() {
-  if [ "$publishToSonatype" = "yes" ]; then
-      open=$(st_stagingReposOpen)
-      allOpenUrls=$(echo $open | jq  '.repositoryURI' | tr -d \")
-      allOpen=$(echo $open | jq  '.repositoryId' | tr -d \")
-
-      echo "Closing open repos: $allOpen"
-      for repo in $allOpen; do st_stagingRepoClose $repo; done
-
-      # ensure the release is available on sonatype staging before triggering scala-dist
-      pollForStagingReposClosed "$allOpen"
-
-      echo "Closed sonatype staging repos: $allOpenUrls."
-  fi
-}
-
 #### STARR (optional)
 
 buildStarr() {
@@ -189,16 +151,14 @@ invokeQuick() {
 buildQuick() {
   clearIvyCache
   if [ "$publishToSonatype" = "yes" ]; then
+    # key has no passphrase
+    export PGP_PASSPHRASE=""
     invokeQuickInternal \
-      'set pgpSigningKey in Global := Some(new java.math.BigInteger("C03EF1D7D692BCFF", 16).longValue)' \
-      'set pgpPassphrase in Global := Some(Array.empty)' \
       "setupBootstrapPublish \"$BOOTSTRAP_REPO_DIR\" $SCALA_VER" \
-      $clean $publishSonatypeTaskCore
+      $clean $publishSonatypeTaskCore sonaUpload
   else
     invokeQuick $clean publish
   fi
-
-  closeStagingRepos
 }
 
 testStability() {
