@@ -6,10 +6,6 @@ if [ -z "$GPG_SUBKEY_SECRET" ]; then
 fi
 
 sensitive() {
-  perl -p -e 's/\$\{([^}]+)\}/defined $ENV{$1} ? $ENV{$1} : $&/eg' < files/credentials-private-repo > ~/.credentials-private-repo
-  perl -p -e 's/\$\{([^}]+)\}/defined $ENV{$1} ? $ENV{$1} : $&/eg' < files/credentials-sonatype     > ~/.credentials-sonatype
-  perl -p -e 's/\$\{([^}]+)\}/defined $ENV{$1} ? $ENV{$1} : $&/eg' < files/sonatype-curl            > ~/.sonatype-curl
-
   openssl aes-256-cbc -md md5 -d -pass "pass:$GPG_SUBKEY_SECRET" -in files/gpg_subkey.enc | gpg --import
 }
 
