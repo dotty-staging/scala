@@ -55,11 +55,8 @@ val fatalWarnings = settingKey[Boolean]("whether or not warnings should be fatal
 // enable fatal warnings automatically on CI
 Global / fatalWarnings := insideCI.value
 
-Global / credentials ++= {
-  val file = Path.userHome / ".credentials"
-  if (file.exists && !file.isDirectory) List(Credentials(file))
-  else Nil
-}
+Global / credentials ++=
+  List(Path.userHome / ".credentials").filter(f => f.exists && !f.isDirectory).map(Credentials.apply)
 
 lazy val publishSettings : Seq[Setting[_]] = Seq(
   // Add a "default" Ivy configuration because sbt expects the Scala distribution to have one:
